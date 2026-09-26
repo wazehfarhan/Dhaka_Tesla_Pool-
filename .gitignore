@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# Environment — never commit real secrets (.env.example is the template)
+.env
+.env.*
+!.env.example
+!.env.test.example
+
+# Test / coverage artefacts
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local databases
+*.sqlite
+*.sqlite3
+pgdata/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
