@@ -1,0 +1,27 @@
+{
+  "name": "dhaka-tesla-pool",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ride-pooling MVP for Dhaka — passengers share one Tesla along a corridor with enforced seat capacity, individual fares and a strict ride state machine.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace backend",
+    "dev:web": "npm run dev --workspace frontend",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md,mjs,css}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,json,md,mjs,css}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.9.9"
+  }
+}
