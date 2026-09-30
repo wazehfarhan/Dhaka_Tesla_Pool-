@@ -61,7 +61,7 @@ All user-controlled input passes Zod schemas at the controller edge; nothing rea
 
 ## 5. API security
 
-- **Rate limiting:** `express-rate-limit` — 100 req/min/IP general, 10 req/min on `/auth/*` → `429 RATE_LIMITED` + `Retry-After`. In-memory store is acceptable for a single instance (scale-up path: shared store — [architecture.md](architecture.md) §9).
+- **Rate limiting:** `express-rate-limit` — 100 req/min/IP general, 10 req/min on `/auth/*` → `429 RATE_LIMITED` + `Retry-After`. In-memory store is acceptable for a single instance (scale-up path: shared store — [architecture.md](architecture.md) §9). Both ceilings are tunable through `RATE_LIMIT_MAX` / `RATE_LIMIT_MAX_AUTH` (defaults exactly as above): the *middleware* is never disabled, only the numbers change, because an operator may want different ones — and because the concurrency suite fires hundreds of requests on purpose, where a `429` is indistinguishable from a lost seat race ([testing.md](testing.md) §6).
 - **CORS:** explicit allowlist (`CORS_ORIGIN` = frontend origin only), credentials enabled for the refresh cookie; never `*` with credentials.
 - **Security headers:** `helmet` defaults (CSP, `X-Content-Type-Options`, referrer policy); HSTS delegated to the hosting platform.
 - **Error handling:** single error middleware; unknown errors return generic `INTERNAL` with a logged request id — stack traces, SQL, and env values never reach the client.

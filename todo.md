@@ -96,53 +96,55 @@ Conventions: `<type>(<scope>): <description>` commits · every task = at least o
 
 ## Phase 8 — Cancellation _(deps: 4, 5, 6, 7)_
 
-- [ ] `POST /rides/:id/cancel`: pre-start only, frees seats atomically, membership → `CANCELLED`, empty pool → `CANCELLED`
-- [ ] Driver pool cancel (pre-start) cascading to active members
-- [ ] Status-history reasons (`PASSENGER_CANCELLED`, `DRIVER_CANCELLED`, `POOL_EMPTY`)
-- [ ] Tests: seat accounting after mixed cancel/join, post-start `409`, others unaffected, pool-empty cascade
+- [x] `POST /rides/:id/cancel`: pre-start only, frees seats atomically, membership → `CANCELLED`, empty pool → `CANCELLED`
+- [x] Driver pool cancel (pre-start) cascading to active members
+- [x] Status-history reasons (`PASSENGER_CANCELLED`, `DRIVER_CANCELLED`, `POOL_EMPTY`)
+- [x] Tests: seat accounting after mixed cancel/join, post-start `409`, others unaffected, pool-empty cascade
+- [x] **Added (documented in [api.md §8](docs/api.md) but missing from this plan):** `GET /rides/:id/payment` + `POST /rides/:id/payment/simulate` — the PRD demo ends with Nusrat tapping **Pay (simulated)** and no box here covered it
 
-**DoD:** invariant `seats_taken = Σ ACTIVE memberships` holds after every test scenario (asserted directly in SQL).
+**DoD:** invariant `seats_taken = Σ ACTIVE memberships` holds after every test scenario (asserted directly in SQL). ✅ — `decideCancel()` (pure, beside the progression table) decides the three outcomes; each cancel is **one transaction**: conditional ride/pool flip → membership `CANCELLED` → raw conditional seat release (the mirror of matching's claim, so the invariant survives a race) → history row. The last member out cancels the pool with reason `POOL_EMPTY` and a **null actor** (nobody chose it). A cancelled trip is never charged: the fare stays `ESTIMATED`, no payment row (A-07). `cancellation.test.ts` (14 tests) asserts the seat invariant after _every_ scenario and covers the payment lifecycle (404 before completion, idempotent `PENDING → PAID`, `409` before `COMPLETED`); 4 pure cancel-rule tests live in `state-machine.test.ts`; driver pool cancel is in `driver-flow.test.ts`. Suite **157/157**.
 
 ## Phase 9 — Concurrency _(deps: 6, 8)_
 
-- [ ] `lastSeat.race.test.ts` exactly as [testing §6](docs/testing.md) (1 seat free → Nusrat vs Shirin → one `201`, one `409`)
-- [ ] 100-iteration loop with reseed; zero tolerance for flakes
-- [ ] Direct-SQL `CHECK` violation proof (raw `UPDATE seats_taken = 4` must fail)
-- [ ] Add `npm run test:concurrency` script; wire into CI later (Phase 11)
+- [x] `lastSeat.race.test.ts` exactly as [testing §6](docs/testing.md) (1 seat free → two claimants → one `201`, one `409`)
+- [x] 100-iteration loop with reseed; zero tolerance for flakes
+- [x] Direct-SQL `CHECK` violation proof (raw `UPDATE seats_taken = 4` must fail)
+- [x] Add `npm run test:concurrency` script; wire into CI later (Phase 11)
 
-**DoD:** 100/100 race runs pass; overbooking impossible by both application and constraint layers; evidence recorded for demo video.
+**DoD:** 100/100 race runs pass; overbooking impossible by both application and constraint layers; evidence recorded for demo video. ✅ — `tests/concurrency/lastSeat.race.test.ts` runs against a **real** Postgres under its own Vitest config (the default suite stays database-free and fast) and re-seeds the entire fixture each iteration, so a stale row can never make a later run pass. Each iteration asserts one `201`, one clean `409 POOL_CAPACITY_EXCEEDED`, `seats_taken = 3` read back from the database, three `ACTIVE` memberships, and that the loser persisted no ride **and** no fare. Three further tests bypass the application entirely: a raw `UPDATE pools SET seats_taken = 4` must fail the `CHECK`; a second `OPEN` pool on the same corridor must fail the partial unique index (a `CANCELLED` one is allowed — that is what "partial" buys); a duplicate ledger row must fail `UNIQUE (ride_request_id)`. **100/100 green**, and `./scripts/smoke.sh` reproduces a single live race over HTTP for the demo video. Design note: the first 100-run attempt failed at iteration 51 — not a lost seat, but our own `100 req/min` limiter answering `429`, which is indistinguishable from a lost race. Resolved with a documented `RATE_LIMIT_MAX` env knob (the limiter stays real, only its ceiling becomes tunable) rather than by disabling middleware.
 
 ## Phase 10 — Frontend Integration _(deps: 4–9 API complete)_
 
-- [ ] Auth screens: `/login`, `/register` (role selector), token-in-memory client with silent refresh, logout, `?next=` redirect
-- [ ] Passenger screens per [ui-ux §2](docs/ui-ux.md): dashboard, request-ride (ZonePicker, SeatStepper, live FareCard), rides list, ride detail (StatusTimeline + pay button + cancel)
-- [ ] Driver screens: dashboard (online toggle, current trip), requests queue, pool detail (roster + state-derived action buttons), history
-- [ ] Route middleware by role (UI convenience only — API remains authoritative)
-- [ ] Polling hook (3 s, backoff, pause on hidden tab) driving active screens
-- [ ] All UI states implemented per ui-ux §5 (loading/empty/error/disabled/unauthorized/no-seats) with error-code → copy mapping
-- [ ] Responsive (375/768/1280) + a11y basics (landmarks, labels, focus, `aria-live`)
+- [x] Auth screens: `/login`, `/register` (role selector), token-in-memory client with silent refresh, logout, `?next=` redirect
+- [x] Passenger screens per [ui-ux §2](docs/ui-ux.md): dashboard, request-ride (ZonePicker, SeatStepper, live FareCard), rides list, ride detail (StatusTimeline + pay button + cancel)
+- [x] Driver screens: dashboard (online toggle, current trip), requests queue, pool detail (roster + state-derived action buttons), history
+- [x] Route middleware by role (UI convenience only — API remains authoritative)
+- [x] Polling hook (3 s, backoff, pause on hidden tab) driving active screens
+- [x] All UI states implemented per ui-ux §5 (loading/empty/error/disabled/unauthorized/no-seats) with error-code → copy mapping
+- [x] Responsive (375/768/1280) + a11y basics (landmarks, labels, focus, `aria-live`)
+- [ ] Playwright E2E specs — **left explicitly open** with Phase 11's E2E box: browser automation needs a Playwright install plus its own CI job, and the same two journeys are already asserted end-to-end by `scripts/smoke.sh` against the real stack
 
-**DoD:** both journeys completable by a human on a clean seed, keyboard-only, at 375 px and 1280 px; zero raw status codes or stack traces ever rendered.
+**DoD:** both journeys completable by a human on a clean seed, keyboard-only, at 375 px and 1280 px; zero raw status codes or stack traces ever rendered. ✅ — passenger screens first, driver screens once the API landed: the `/driver` placeholder (which honestly listed the missing endpoints) became the real dashboard — garage with the online toggle and an add-vehicle form, the active trip, the Requests queue — plus `/driver/pools/[id]` (roster with per-passenger fare and payment, pool timeline, action buttons) and `/driver/history`. The buttons come from `nextDriverAction()`, a mirror of the backend's `DRIVER_TRANSITIONS` table, so the UI never offers a move the API would refuse with `409`; the passenger's Cancel and Pay are live mutations that re-read the ride afterwards. Money stays integer poisha in the DOM (`data-poisha`) with `৳115.20` rendered for humans, and every API code maps to human copy in `lib/errors.ts`.
 
 ## Phase 11 — Testing _(deps: 10; extends tests written incrementally in 3–9)_
 
-- [ ] Gap review: walk [traceability](docs/traceability.md) matrix row → named test; add any missing
-- [ ] Playwright E2E: `passenger-journey.spec.ts`, `driver-journey.spec.ts`, negative slice (testing §7)
-- [ ] `npm test` umbrella scripts; suite wall-clock < 2 min
-- [ ] CI workflow: on PR → lint, typecheck, unit, integration (test Postgres service), (e2e on main/pre-release)
-- [ ] Flake audit: run full suite 10× consecutively
+- [x] Gap review: walk [traceability](docs/traceability.md) matrix row → named test; add any missing
+- [ ] Playwright E2E: `passenger-journey.spec.ts`, `driver-journey.spec.ts`, negative slice (testing §7) — **not done**, deliberately: the two journeys are asserted end-to-end by `scripts/smoke.sh` over HTTP against the real Compose stack, and half-installing browser automation would add a dependency and a CI job that prove less than what already runs
+- [x] `npm test` umbrella scripts; suite wall-clock < 2 min
+- [x] CI workflow: on PR → lint, typecheck, unit, integration (test Postgres service), (e2e on main/pre-release)
+- [x] Flake audit: run full suite 10× consecutively
 
-**DoD:** CI green on a PR; every P0 row in the matrix has a test name; no flaky tests.
+**DoD:** CI green on a PR; every P0 row in the matrix has a test name; no flaky tests. ✅ — `.github/workflows/ci.yml` runs four jobs: **quality** (lint, typecheck, the 157-test default suite, build, prettier), **concurrency** (a Postgres service container + the 100-iteration race), **images** (`docker compose build`, then `scripts/smoke.sh` against the built stack — a broken Dockerfile fails CI instead of a reviewer) and **flake-audit** (`scripts/flake-audit.sh 10`, failing on the first non-green run). Default suite wall-clock ~14 s. Traceability rows 9–15 all name a real suite (`cancellation.test.ts`, `driver-flow.test.ts`, `state-machine.test.ts`, `vehicles.test.ts`, testing §5 items 1–7).
 
 ## Phase 12 — Docker _(deps: 4–10 stable)_
 
-- [ ] `backend/Dockerfile` multi-stage (deps → build → `node:22-alpine`), `frontend/Dockerfile` (Next standalone)
-- [ ] `docker-compose.yml`: `db` (volume + `pg_isready`), `api` (depends_on healthy → migrate → seed → start, healthcheck `/api/v1/health`), `web` (healthcheck `/`)
-- [ ] Entrypoint script: `prisma migrate deploy && prisma db seed && node dist/server.js` (seed idempotent, prod-guarded)
-- [ ] Fresh-clone smoke: `git clone` → `cp .env.example .env` → `docker compose up` → demo scenario runs
-- [ ] `.env.example` parity check vs [security §6](docs/security.md)
+- [x] `backend/Dockerfile` multi-stage (deps → build → `node:22-alpine`), `frontend/Dockerfile` (Next standalone)
+- [x] `docker-compose.yml`: `db` (volume + `pg_isready`), `api` (depends_on healthy → migrate → seed → start, healthcheck `/api/v1/health`), `web` (healthcheck `/login`)
+- [x] Entrypoint script: `prisma migrate deploy && prisma db seed && node dist/server.js` (seed idempotent, prod-guarded)
+- [x] Fresh-clone smoke: `git clone` → `cp .env.example .env` → `docker compose up` → demo scenario runs
+- [x] `.env.example` parity check vs [security §6](docs/security.md)
 
-**DoD:** a stranger with Docker reaches a working demo in < 15 min (Goal G1) using only the README.
+**DoD:** a stranger with Docker reaches a working demo in < 15 min (Goal G1) using only the README. ✅ — verified end to end on this machine from a clean volume: `docker compose down -v && docker compose up -d --build` brings up db → api (migrated + seeded) → web, and `./scripts/smoke.sh` then passes **22 assertions**, including the live one-seat race (one `201`, one `409`, the pool never overbooks). Three build traps worth recording, because each costs an hour otherwise: the workspace hoist means `backend/node_modules` may not exist at all (copying it unconditionally fails the build); Prisma 7 only discovers `prisma7.config.ts` from the `backend/` working directory, so the entrypoint `cd`s there; and the seed runs from source through `tsx`, so the image needs the _source_ generated client alongside `dist`'s. The web image also needed `outputFileTracingRoot` pointed at the repo root, without which the standalone bundle misses hoisted modules.
 
 ## Phase 13 — Deployment _(deps: 12)_
 
@@ -156,9 +158,10 @@ Conventions: `<type>(<scope>): <description>` commits · every task = at least o
 
 ## Phase 14 — README _(deps: 13)_
 
-- [ ] Sections: what/why, cast & demo, architecture diagram, **quickstart (`docker compose up`)**, env vars, migrations/seed, API summary (link `docs/api.md`), testing commands, deployment URLs, screenshots, branch/commit conventions
-- [ ] **AI Usage section** (brief requirement): AI tools used · what they were used for · **one accepted suggestion** · **one rejected/modified suggestion** · why it was changed — filled with _actual_ project history only
-- [ ] Link demo video (Phase 16) + docs/ index
+- [x] Sections: what/why, cast & demo, architecture diagram, **quickstart (`docker compose up`)**, env vars, migrations/seed, API summary (link `docs/api.md`), testing commands, deployment URLs, screenshots, branch/commit conventions
+- [x] **AI Usage section** (brief requirement): AI tools used · what they were used for · **one accepted suggestion** · **one rejected/modified suggestion** · why it was changed — filled with _actual_ project history only
+- [ ] Link demo video (Phase 16) + screenshots — blocked on recording
+- [ ] Record live deployment URLs — blocked on Phase 13 accounts
 
 **DoD:** README alone lets an evaluator run, test, and understand the project; AI section complete and truthful.
 

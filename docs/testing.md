@@ -45,8 +45,8 @@ Integration tests need an isolated database (`dhaka_tesla_pool_test`) recreated 
 | `poolAccept.test` | open pool | Jashim accept → `ACCEPTED` for pool **and** every member; passenger calling accept → `403`; re-accept → `409 ILLEGAL_STATE_TRANSITION` |
 | `capacity.test` | pool at 2/3 | third join → `201` seats 3/3; fourth join → `409 POOL_CAPACITY_EXCEEDED`, `seatsTaken` still 3, no `pool_members` row |
 | `farePersist.test` | completed trip | `fares` row is `FINAL` with `total_poisha=11520` per passenger (Nusrat **and** Rafiq individually), discount applied for ≥2 completers |
-| `payment.test` | completed trip | payment `PENDING` → simulate → `PAID`, `method=SIMULATED`; repeat → still `PAID`, one row only |
-| `cancel.test` | 2-member pool | Shirin cancels → her request/member `CANCELLED`, seats 1/2; Nusrat's ride untouched |
+| `payment.test` | completed trip | payment `PENDING` → simulate → `PAID`, `method=SIMULATED`; repeat → still `PAID`, one row only — **delivered by `cancellation.test.ts`**, together with the `404` before completion and the `409` before `COMPLETED` |
+| `cancel.test` | 2-member pool | Shirin cancels → her request/member `CANCELLED`, seats 1/2; Nusrat's ride untouched — **delivered by `cancellation.test.ts`**, which also asserts the seat invariant after every scenario and the `POOL_EMPTY` cascade |
 | `lifecycle.test` | full happy path | driver arrives → starts → completes: pool + all active members end `COMPLETED`, status history has every transition |
 | `driverFlow.test` | 2-member `OPEN` pool (two `POST /rides` on the demo corridor) | driver queue/detail: roster with `ESTIMATED` fares and `null` payments, corridor names, `distanceKm`, pagination meta, `?status=` filters, own-scope only; `accept` → pool **and** every member `ACCEPTED` + history rows; re-accept and any out-of-order action → `409 ILLEGAL_STATE_TRANSITION` with `details {current, expected}`; foreign/unknown pool → `404`; `complete` → `FINAL` `11520` + `PENDING` payment per member in one transaction, the passenger's own `GET /rides/:id` agrees, `?status=COMPLETED` is the driver's history; a cancelled member stays `CANCELLED`, undiscounted (`14400`) for the lone completer and unpaid |
 | `vehicles.test` | driver garage (`GET`/`POST`/`PATCH`) | own vehicles only, oldest first; `201` starts `OFFLINE`; duplicate plate → `409 CONFLICT` (fleet-wide UNIQUE); capacity outside 1…8 / unknown key → `400`; toggle answers `{id, status}`; foreign/unknown id → `404`, malformed id or status → `400`; `ONLINE` is what lets a new ride request match (`NO_VEHICLE_AVAILABLE` otherwise) and that pool appears in the owner's queue |
@@ -71,28 +71,17 @@ Every case runs as the *wrong* actor and must fail exactly as specified:
 
 **Setup (real app, real Postgres — not mocks):** seed a pool on Banani→Dhanmondi with `seat_capacity = 3` and two `ACTIVE` members (Rafiq + Mehjabin) → `seats_taken = 2`, exactly **1 seat free**.
 
-**Procedure:**
-```ts
-// tests/concurrency/lastSeat.race.test.ts (shape, not final code)
-const [a, b] = await Promise.all([
-  api.post('/api/v1/rides').set(auth(nusrat)).send({ pickupZone:'Banani', destinationZone:'Dhanmondi', seats:1 }),
-  api.post('/api/v1/rides').set(auth(shirin)).send({ pickupZone:'Banani', destinationZone:'Dhanmondi', seats:1 }),
-]);
-const ok = [a, b].filter(r => r.status === 201).length;
-const rejected = [a, b].filter(r => r.status === 409 && r.body.error.code === 'POOL_CAPACITY_EXCEEDED').length;
-expect(ok).toBe(1);            // exactly one winner
-expect(rejected).toBe(1);      // exactly one clean rejection
-// and afterwards, read the pool back:
-expect(pool.seatsTaken).toBe(3);              // never 4
-expect(activeMembers(pool)).toHaveLength(3);  // no phantom membership
-expect(loser.ride).toBeUndefined();           // loser persisted nothing
-```
+**Procedure (as delivered — `backend/tests/concurrency/lastSeat.race.test.ts`):** the real Express app is built against a real `Database` (`createDatabase(DATABASE_URL_TEST)`), and the fixture is **re-seeded from scratch every iteration** (`TRUNCATE … RESTART IDENTITY CASCADE`) so a row left by a previous iteration can never make a later one pass. Each iteration then fires both `POST /api/v1/rides` in the same tick via `Promise.all` and asserts, in order: exactly one `201`; exactly one `409 POOL_CAPACITY_EXCEEDED`; the winner joined the pool both tried to join; `seats_taken = 3` read back from the database (**never 4**); exactly three `ACTIVE` memberships; and that the loser persisted **no ride row and no fare row** — the whole transaction rolled back, not just the claim.
 
-**Strengthening:** wrap the `Promise.all` in a loop of **100 iterations** (re-seeding between runs) asserting the same invariants — this is Goal G2. Also assert the DB `CHECK` would have caught a hypothetical bypass: a direct raw `UPDATE pools SET seats_taken = 4` must fail with a constraint violation (proves defense-in-depth layer 1 works).
+**Defense in depth, bypassing the application entirely:** three sibling tests ask Postgres directly. A raw `UPDATE pools SET seats_taken = 4` must fail the `CHECK` (and leave the row untouched); a second `OPEN` pool on the same corridor must fail `idx_unique_open_pool_per_corridor`, while a `CANCELLED` one is accepted — that is precisely what "partial" buys; a duplicate seat-ledger row must fail `UNIQUE (ride_request_id)`.
+
+**Strengthening:** the loop runs **100 iterations** by default (Goal G2, zero tolerance for flakes). `CONCURRENCY_ITERATIONS` lowers it for a quick local edit loop; CI leaves it at 100. The suite has its own Vitest config (`npm run test:concurrency`) and is excluded from the default, database-free suite. Its global setup **fails loudly** when `DATABASE_URL_TEST` is missing — a race test that quietly skips proves nothing.
+
+**One finding worth keeping:** the first 100-run attempt failed at iteration 51 with *zero* winners. The cause was our own rate limiter answering `429 RATE_LIMITED` (100 req/min, security.md §5), which from the test's point of view is indistinguishable from a lost race. The fix was a documented `RATE_LIMIT_MAX` / `RATE_LIMIT_MAX_AUTH` env knob — the middleware stays real, only its ceiling becomes tunable — rather than disabling rate limiting for tests.
 
 **Why real infrastructure:** mocks cannot exercise Postgres row locks, EvalPlanQual re-checks, or the partial unique index — the thing being tested *is* the database's behaviour under contention. The test runs against the compose test DB (`DATABASE_URL_TEST`), isolated from dev data.
 
-**Reproducing manually (for the demo video):** run two `curl` joins in a bash loop with `&` to launch simultaneously; the response pair shows one `201` and one `409`.
+**Reproducing manually (for the demo video):** `./scripts/smoke.sh` step 6 does exactly this over HTTP with two `curl` joins launched with `&`, and asserts one `201`, one `409 POOL_CAPACITY_EXCEEDED`, and a pool that never overbooks.
 
 ## 7. End-to-end tests (Playwright)
 
