@@ -19,7 +19,13 @@ import { createZonesRouter } from './modules/zones/zones.routes.js';
 import type { AppLogger } from './shared/logger.js';
 
 export interface AppDependencies {
-  env: Pick<Env, 'CORS_ORIGIN' | 'NODE_ENV' | 'JWT_ACCESS_SECRET' | 'JWT_REFRESH_SECRET'>;
+  /**
+   * The four values every caller must supply. The rate-limit ceilings are
+   * optional so existing callers (tests, scripts) keep compiling; unset means
+   * the documented security.md §5 defaults.
+   */
+  env: Pick<Env, 'CORS_ORIGIN' | 'NODE_ENV' | 'JWT_ACCESS_SECRET' | 'JWT_REFRESH_SECRET'> &
+    Partial<Pick<Env, 'RATE_LIMIT_MAX' | 'RATE_LIMIT_MAX_AUTH'>>;
   logger: AppLogger;
   database?: Database;
 }
@@ -57,7 +63,10 @@ export function createApp({ env, logger, database }: AppDependencies): Express {
   app.use(helmet());
 
   // Rate limiting runs before body parsing: a flood never reaches JSON decoding.
-  const { general, auth } = createRateLimiters();
+  const { general, auth } = createRateLimiters({
+    general: env.RATE_LIMIT_MAX,
+    auth: env.RATE_LIMIT_MAX_AUTH,
+  });
   app.use(general);
   app.use('/api/v1/auth', auth);
 

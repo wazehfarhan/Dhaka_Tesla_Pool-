@@ -1,0 +1,132 @@
+# Continuous integration (todo.md Phase 11, testing.md §2).
+#
+# Three gates, each answering a different question:
+#   quality      — does the code lint, typecheck, test and build?
+#   concurrency  — does the seat race still hold against a *real* Postgres?
+#   images       — do the Dockerfiles still build? (a broken image is a broken demo)
+#
+# The flake audit runs the default suite ten times: a test that passes 9/10 is a
+# broken test, and this project claims zero tolerance for flakes (todo.md).
+
+name: CI
+
+on:
+  push:
+    branches: [main, 'pre-release', 'release/**']
+  pull_request:
+    branches: [main, 'pre-release']
+
+concurrency:
+  # One run per branch: a newer push makes an in-flight run pointless.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: lint · typecheck · test · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          # npm ci, not npm install: the lockfile must match or the build stops.
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test (default suite — no database needed)
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Formatting
+        run: npm run format:check
+
+  concurrency:
+    name: concurrency — the last-seat race (100 runs)
+    runs-on: ubuntu-latest
+    # Its own service container: the suite measures Postgres row locks, so a
+    # shared or mocked database would prove nothing (testing.md §6).
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app_password
+          POSTGRES_DB: dhaka_tesla_pool_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d dhaka_tesla_pool_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL_TEST: postgresql://app:app_password@localhost:5432/dhaka_tesla_pool_test
+      JWT_ACCESS_SECRET: ci_access_secret_at_least_32_characters_long
+      JWT_REFRESH_SECRET: ci_refresh_secret_at_least_32_characters_long
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Concurrency suite (100 iterations + constraint proofs)
+        run: npm run test:concurrency --workspace backend
+
+  images:
+    name: docker images build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Compose builds both images with the repo root as context; this is the
+      # same path a reviewer takes on a fresh clone (deployment.md §1).
+      - name: Build the compose images
+        run: docker compose build
+
+      - name: Smoke test the built stack
+        run: |
+          docker compose up -d
+          # Wait for the API's own healthcheck rather than guessing a sleep.
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:4000/api/v1/health > /dev/null; then break; fi
+            sleep 2
+          done
+          ./scripts/smoke.sh
+
+      - if: always()
+        run: docker compose logs --no-color | tail -100
+
+      - if: always()
+        run: docker compose down -v
+
+  flake-audit:
+    name: flake audit (10 consecutive runs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run the default suite ten times
+        run: ./scripts/flake-audit.sh 10

@@ -1,0 +1,75 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Dhaka Tesla Pool — local stack (deployment.md §1)
+#
+#   cp .env.example .env && docker compose up --build
+#
+# Three services, no local Node or Postgres needed:
+#   db  — postgres:16-alpine, volume-backed, `pg_isready` healthcheck
+#   api — the backend image; waits for db to be healthy, then migrates, seeds
+#        and serves on :4000 (the entrypoint script lives in backend/)
+#   web — the Next.js standalone image on :3000
+#
+# `NEXT_PUBLIC_API_URL` is inlined at *build* time, so it is passed as a build
+# arg; changing it later needs `docker compose build web`, not just `up`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_password}
+      POSTGRES_DB: ${POSTGRES_DB:-dhaka_tesla_pool}
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # The API must not start before Postgres accepts connections: the
+      # entrypoint's `migrate deploy` has no retry of its own, by design.
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-dhaka_tesla_pool}']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  api:
+    build:
+      # Context is the repo root: the workspaces install from there (see
+      # backend/Dockerfile).
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app_password}@db:5432/${POSTGRES_DB:-dhaka_tesla_pool}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?copy .env.example to .env — JWT_ACCESS_SECRET is required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?copy .env.example to .env — JWT_REFRESH_SECRET is required}
+    ports:
+      - '${PORT:-4000}:4000'
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+    environment:
+      # Read at runtime for any server-side fetch; the browser copy is the
+      # inlined build arg above.
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+    ports:
+      - '3000:3000'
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:

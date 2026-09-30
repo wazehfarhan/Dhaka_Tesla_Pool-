@@ -1,0 +1,26 @@
+# Keep the build context small and the image free of local state (deployment.md §1).
+# Everything here is either regenerated inside the image or irrelevant to it.
+
+.git
+.gitignore
+**/node_modules
+**/dist
+**/.next
+**/tsconfig.tsbuildinfo
+**/*.log
+
+# Secrets never enter an image: the containers get their env from compose.
+.env
+.env.*
+!.env.example
+**/.env.local
+
+# Docs and tests are not needed to serve the app (the CI job runs them instead).
+docs
+backend/tests
+todo.md
+README.md
+
+# The compose file and the local env template are not inputs to any image.
+docker-compose.yml
+**/Dockerfile
