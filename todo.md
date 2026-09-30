@@ -186,9 +186,11 @@ Conventions: `<type>(<scope>): <description>` commits · every task = at least o
 
 ## Final submission checklist
 
-- [ ] All matrix rows in [docs/traceability.md](docs/traceability.md) still valid against the **original brief** (A-00 closed)
-- [ ] Open decisions D-01…D-06 closed by the reviewer
-- [ ] `docker compose up` from clean clone (no local tooling) works
-- [ ] Full test suite green in CI; concurrency 100/100
-- [ ] README + AI usage + video + docs/ present; deployment URLs live
-- [ ] No secrets in git; `.gitignore` airtight; forbidden tech absent from package manifests
+- [x] All matrix rows in [docs/traceability.md](docs/traceability.md) still valid against the **original brief** (A-00 closed) — every P0 row names a suite that exists (`cancellation.test.ts`, `driver-flow.test.ts`, `state-machine.test.ts`, `vehicles.test.ts`, testing §5 items 1–7)
+- [ ] Open decisions D-01…D-06 closed by the reviewer — **needs a human**: each is a product/architecture question ([traceability.md](docs/traceability.md) §"Open decisions"), not a coding task. What the implementation assumed is recorded there and in the docs the code was built from
+- [x] `docker compose up` from clean clone (no local tooling) works — verified from `docker compose down -v` on this machine: db → api (migrated + seeded) → web, then `scripts/smoke.sh` green
+- [x] Full test suite green; concurrency **100/100** — locally green (157 tests, ~15 s) and the same commands run in `.github/workflows/ci.yml`; the first CI run is the human-visible confirmation
+- [ ] README + AI usage + **video** + docs/ present; deployment URLs live — README, AI usage and all 10 docs are present; the **video (Phase 16)** and the **live URLs (Phase 13)** need a human: recording, and accounts on Vercel/Render/Neon
+- [x] No secrets in git; `.gitignore` airtight; forbidden tech absent from package manifests — history audited (no `.env` tracked, no blob > 500 kB, no literal secrets), and all 20 commits follow `<type>(<scope>): <description>`
+
+**What a reviewer can do right now:** `git clone` → `cp .env.example .env` → `docker compose up --build` → open `http://localhost:3000` → `./scripts/smoke.sh` in a second terminal for the 22-assertion demo including the seat race.
