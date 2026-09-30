@@ -298,16 +298,23 @@ export function createFakeDatabase(): FakeDatabase {
       findFirst: async ({
         where,
       }: {
-        where: { status?: PoolStatus; pickupZoneId: number; destinationZoneId: number };
+        where: {
+          id?: string;
+          driverId?: string;
+          status?: PoolStatus;
+          pickupZoneId?: number;
+          destinationZoneId?: number;
+        };
       }) => {
         for (const pool of pools.values()) {
-          if (
+          const matches =
+            (where.id === undefined || pool.id === where.id) &&
+            (where.driverId === undefined || pool.driverId === where.driverId) &&
             (where.status === undefined || pool.status === where.status) &&
-            pool.pickupZoneId === where.pickupZoneId &&
-            pool.destinationZoneId === where.destinationZoneId
-          ) {
-            return { ...pool };
-          }
+            (where.pickupZoneId === undefined || pool.pickupZoneId === where.pickupZoneId) &&
+            (where.destinationZoneId === undefined ||
+              pool.destinationZoneId === where.destinationZoneId);
+          if (matches) return { ...pool };
         }
         return null;
       },
@@ -320,14 +327,24 @@ export function createFakeDatabase(): FakeDatabase {
       findMany: async ({
         where,
         orderBy,
+        skip,
+        take,
         include,
       }: {
-        where?: { status?: PoolStatus; pickupZoneId?: number; destinationZoneId?: number };
+        where?: {
+          driverId?: string;
+          status?: PoolStatus;
+          pickupZoneId?: number;
+          destinationZoneId?: number;
+        };
         orderBy?: { createdAt?: 'asc' | 'desc' };
+        skip?: number;
+        take?: number;
         include?: { vehicle?: { select: { id: true; status: true } } };
       }) => {
         const rows = [...pools.values()].filter(
           (pool) =>
+            (where?.driverId === undefined || pool.driverId === where.driverId) &&
             (where?.status === undefined || pool.status === where.status) &&
             (where?.pickupZoneId === undefined || pool.pickupZoneId === where.pickupZoneId) &&
             (where?.destinationZoneId === undefined ||
@@ -338,7 +355,9 @@ export function createFakeDatabase(): FakeDatabase {
             ? b.createdAt.getTime() - a.createdAt.getTime()
             : a.createdAt.getTime() - b.createdAt.getTime(),
         );
-        return rows.map((pool) => {
+        const start = skip ?? 0;
+        const page = take === undefined ? rows.slice(start) : rows.slice(start, start + take);
+        return page.map((pool) => {
           if (include?.vehicle) {
             const vehicle = vehicles.get(pool.vehicleId);
             if (!vehicle) {
@@ -388,22 +407,118 @@ export function createFakeDatabase(): FakeDatabase {
         pools.set(row.id, row);
         return { ...row };
       },
+
+      // `meta.total` for the driver queue (api.md §6.1) — same filter as the page above.
+      count: async ({ where }: { where: { driverId?: string; status?: PoolStatus } }) => {
+        return [...pools.values()].filter(
+          (pool) =>
+            (where.driverId === undefined || pool.driverId === where.driverId) &&
+            (where.status === undefined || pool.status === where.status),
+        ).length;
+      },
+
+      // The conditional transition flip (driver.repository.claimPoolTransition):
+      // a status-gated UPDATE, exactly like Postgres under READ COMMITTED — a
+      // pool that moved on matches 0 rows, which the service reports as the
+      // documented 409 ILLEGAL_STATE_TRANSITION (api.md §6.3).
+      updateMany: async ({
+        where,
+        data,
+      }: {
+        where: { id: string; status: PoolStatus };
+        data: { status: PoolStatus; updatedAt?: Date };
+      }) => {
+        const pool = pools.get(where.id);
+        if (!pool || pool.status !== where.status) return { count: 0 };
+        pool.status = data.status;
+        pool.updatedAt = data.updatedAt ?? new Date();
+        return { count: 1 };
+      },
     },
 
     vehicle: {
+      /**
+       * Two shapes: matching's ONLINE pick (`{status}`, oldest first) and the
+       * registry's lookups — plate uniqueness (`{plate}`) and the ownership
+       * scope (`{id, ownerId}`) from vehicles.service (api.md §7).
+       */
       findFirst: async ({
         where,
         orderBy,
       }: {
-        where?: { status?: VehicleStatus };
+        where?: { id?: string; ownerId?: string; plate?: string; status?: VehicleStatus };
         orderBy?: { createdAt?: 'asc' | 'desc' };
       }) => {
-        const filtered = where?.status
-          ? [...vehicles.values()].filter((vehicle) => vehicle.status === where.status)
-          : [...vehicles.values()];
+        const filtered = [...vehicles.values()].filter(
+          (vehicle) =>
+            (where?.id === undefined || vehicle.id === where.id) &&
+            (where?.ownerId === undefined || vehicle.ownerId === where.ownerId) &&
+            (where?.plate === undefined || vehicle.plate === where.plate) &&
+            (where?.status === undefined || vehicle.status === where.status),
+        );
         const sorted = filtered.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
         const row = orderBy?.createdAt === 'desc' ? sorted[sorted.length - 1] : sorted[0];
         return row ? { ...row } : null;
+      },
+
+      /** `GET /vehicles` — the caller's garage, oldest first (api.md §7.1). */
+      findMany: async ({
+        where,
+        orderBy,
+      }: {
+        where?: { ownerId?: string };
+        orderBy?: { createdAt?: 'asc' | 'desc' };
+      }) => {
+        const rows = [...vehicles.values()].filter(
+          (vehicle) => where?.ownerId === undefined || vehicle.ownerId === where.ownerId,
+        );
+        rows.sort((a, b) =>
+          orderBy?.createdAt === 'desc'
+            ? b.createdAt.getTime() - a.createdAt.getTime()
+            : a.createdAt.getTime() - b.createdAt.getTime(),
+        );
+        return rows.map((vehicle) => ({ ...vehicle }));
+      },
+
+      /** UNIQUE (plate) — a duplicate is P2002, which the service pre-empts with a 409. */
+      create: async ({
+        data,
+      }: {
+        data: { ownerId: string; model: string; plate: string; seatCapacity: number };
+      }) => {
+        const conflict = [...vehicles.values()].some((vehicle) => vehicle.plate === data.plate);
+        if (conflict) {
+          throw Object.assign(new Error('Unique constraint failed on the fields: (`plate`)'), {
+            code: P2002,
+          });
+        }
+        const now = new Date();
+        const row: FakeVehicleRow = {
+          id: randomUUID(),
+          status: 'OFFLINE',
+          createdAt: now,
+          updatedAt: now,
+          ...data,
+        };
+        vehicles.set(row.id, row);
+        return { ...row };
+      },
+
+      /** `PATCH /vehicles/:id` — the ONLINE/OFFLINE toggle (api.md §7.2). */
+      update: async ({
+        where,
+        data,
+      }: {
+        where: { id: string };
+        data: { status: VehicleStatus };
+      }) => {
+        const row = vehicles.get(where.id);
+        if (!row) {
+          throw Object.assign(new Error('Record to update not found.'), { code: P2025 });
+        }
+        row.status = data.status;
+        row.updatedAt = new Date();
+        return { ...row };
       },
     },
 
@@ -442,24 +557,53 @@ export function createFakeDatabase(): FakeDatabase {
       },
 
       // GET /rides — one page, newest first, money side joined (FR-HISTORY-001).
+      /**
+       * The `where` shapes the app issues: the passenger page
+       * (`passengerId` + optional `status`), the idempotency/ownership
+       * lookups, and the driver flow — a page's roster (`poolId: {in}`) or a
+       * pool's cascade set (`poolId` + `status: {not: 'CANCELLED'}`) with the
+       * roster's passenger name / fare / payment joined in one round trip.
+       */
       findMany: async ({
         where,
         orderBy,
         skip,
         take,
+        select,
         include,
       }: {
-        where: { passengerId?: string; status?: RideStatus };
+        where: {
+          passengerId?: string;
+          poolId?: string | { in: string[] };
+          status?: RideStatus | { not: RideStatus };
+        };
         orderBy?: { createdAt?: 'asc' | 'desc' };
         skip?: number;
         take?: number;
-        include?: { fare?: boolean; payment?: boolean };
+        select?: { id: true; status: true; seats: true };
+        include?: {
+          fare?: boolean;
+          payment?: boolean;
+          passenger?: { select: { name: true } };
+        };
       }) => {
+        const matchesPool = (ride: FakeRideRequestRow) => {
+          if (where.poolId === undefined) return true;
+          return typeof where.poolId === 'string'
+            ? ride.poolId === where.poolId
+            : where.poolId.in.includes(ride.poolId);
+        };
+        const matchesStatus = (ride: FakeRideRequestRow) => {
+          const spec = where.status;
+          if (spec === undefined) return true;
+          return typeof spec === 'string' ? ride.status === spec : ride.status !== spec.not;
+        };
         const rows = [...rideRequests.values()]
           .filter(
             (ride) =>
               (where.passengerId === undefined || ride.passengerId === where.passengerId) &&
-              (where.status === undefined || ride.status === where.status),
+              matchesPool(ride) &&
+              matchesStatus(ride),
           )
           .sort((a, b) =>
             orderBy?.createdAt === 'desc'
@@ -468,19 +612,34 @@ export function createFakeDatabase(): FakeDatabase {
           );
         const start = skip ?? 0;
         const page = take === undefined ? rows.slice(start) : rows.slice(start, start + take);
-        return page.map((ride) => ({
-          ...ride,
-          ...(include?.fare
-            ? { fare: [...fares.values()].find((fare) => fare.rideRequestId === ride.id) ?? null }
-            : {}),
-          ...(include?.payment
-            ? {
-                payment:
-                  [...payments.values()].find((payment) => payment.rideRequestId === ride.id) ??
-                  null,
-              }
-            : {}),
-        }));
+        // The cascade read (listActivePoolRides) selects only what it advances.
+        if (select) {
+          return page.map((ride) => ({ id: ride.id, status: ride.status, seats: ride.seats }));
+        }
+        return page.map((ride) => {
+          // Integrity: a ride whose passenger row is missing is a fake-DB bug,
+          // not a silent "Unknown passenger" (same stance as pool → vehicle).
+          const passenger = include?.passenger ? users.get(ride.passengerId) : undefined;
+          if (include?.passenger && !passenger) {
+            throw new Error(`Fake DB: ride ${ride.id} references a missing passenger`);
+          }
+          return {
+            ...ride,
+            ...(passenger ? { passenger: { name: passenger.name } } : {}),
+            ...(include?.fare
+              ? {
+                  fare: [...fares.values()].find((fare) => fare.rideRequestId === ride.id) ?? null,
+                }
+              : {}),
+            ...(include?.payment
+              ? {
+                  payment:
+                    [...payments.values()].find((payment) => payment.rideRequestId === ride.id) ??
+                    null,
+                }
+              : {}),
+          };
+        });
       },
 
       /** `meta.total` for the same filter the page above used. */
@@ -533,6 +692,17 @@ export function createFakeDatabase(): FakeDatabase {
           seats: data.seats,
         };
         rideRequests.set(row.id, row);
+        return { ...row };
+      },
+
+      /** The driver cascade's per-ride advance (driver.repository.updateRideStatus). */
+      update: async ({ where, data }: { where: { id: string }; data: { status: RideStatus } }) => {
+        const row = rideRequests.get(where.id);
+        if (!row) {
+          throw Object.assign(new Error('Record to update not found.'), { code: P2025 });
+        }
+        row.status = data.status;
+        row.updatedAt = new Date();
         return { ...row };
       },
     },

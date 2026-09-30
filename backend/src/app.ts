@@ -13,6 +13,7 @@ import { createTokenService } from './modules/auth/token.service.js';
 import { createFareRouter } from './modules/fare/fare.routes.js';
 import { createHealthRouter } from './modules/health/health.routes.js';
 import { createRidesRouter } from './modules/rides/rides.routes.js';
+import { createVehiclesRouter } from './modules/vehicles/vehicles.routes.js';
 import { createZonesRouter } from './modules/zones/zones.routes.js';
 import type { AppLogger } from './shared/logger.js';
 
@@ -69,6 +70,7 @@ export function createApp({ env, logger, database }: AppDependencies): Express {
   app.use('/api/v1', createFareRouter({ database, authenticate, authorize }));
   app.use('/api/v1', createZonesRouter({ database }));
   app.use('/api/v1', createRidesRouter({ database, authenticate, authorize }));
+  app.use('/api/v1', createVehiclesRouter({ database, authenticate, authorize }));
 
   // Order matters: these two are always last.
   app.use(createNotFoundHandler());
