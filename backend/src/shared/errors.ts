@@ -92,6 +92,13 @@ export class SameZoneError extends AppError {
   }
 }
 
+/** Unknown zone name (or no distance recorded between the two) — api.md §4. */
+export class ZoneNotFoundError extends AppError {
+  constructor(message = 'One or both selected zones do not exist.') {
+    super('ZONE_NOT_FOUND', message);
+  }
+}
+
 export class NotFoundError extends AppError {
   constructor(message = 'Resource not found.') {
     super('NOT_FOUND', message);
@@ -99,7 +106,56 @@ export class NotFoundError extends AppError {
 }
 
 export class ConflictError extends AppError {
-  constructor(code: ErrorCode = 'CONFLICT', message = 'The request conflicts with the current state.') {
+  constructor(
+    code: ErrorCode = 'CONFLICT',
+    message = 'The request conflicts with the current state.',
+  ) {
     super(code, message);
+  }
+}
+
+export class UnauthenticatedError extends AppError {
+  constructor(message = 'Authentication required.') {
+    super('UNAUTHENTICATED', message);
+  }
+}
+
+/** Uniform for unknown email and wrong password alike — no user enumeration (security.md §1). */
+export class InvalidCredentialsError extends AppError {
+  constructor(message = 'Invalid email or password.') {
+    super('INVALID_CREDENTIALS', message);
+  }
+}
+
+export class ForbiddenError extends AppError {
+  constructor(message = 'You do not have permission to perform this action.') {
+    super('FORBIDDEN', message);
+  }
+}
+
+export class EmailTakenError extends AppError {
+  constructor(message = 'An account with this email already exists.') {
+    super('EMAIL_TAKEN', message);
+  }
+}
+
+/** Full pool on the corridor — api.md §5.1 / PRD §11 (matching). */
+export class PoolCapacityExceededError extends AppError {
+  constructor(message = 'No available seats remain.') {
+    super('POOL_CAPACITY_EXCEEDED', message);
+  }
+}
+
+/** No vehicle is ONLINE for the corridor — api.md §5.1 / PRD §11 (matching). */
+export class NoVehicleAvailableError extends AppError {
+  constructor(message = 'No vehicle is currently available for this corridor.') {
+    super('NO_VEHICLE_AVAILABLE', message);
+  }
+}
+
+/** The caller already holds a non-terminal ride — Assumption A-06 (api.md §1). */
+export class ActiveRideExistsError extends AppError {
+  constructor(message = 'You already have an active ride.') {
+    super('ACTIVE_RIDE_EXISTS', message);
   }
 }

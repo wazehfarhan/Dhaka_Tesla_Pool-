@@ -5,22 +5,24 @@ import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
 import type { Env } from './config/env.js';
 import type { Database } from './db/client.js';
+import { createAuthMiddleware } from './middleware/auth.js';
 import { createErrorHandler, createNotFoundHandler } from './middleware/error-handler.js';
+import { createRateLimiters } from './middleware/rate-limit.js';
+import { createAuthRouter } from './modules/auth/auth.routes.js';
+import { createTokenService } from './modules/auth/token.service.js';
 import { createHealthRouter } from './modules/health/health.routes.js';
 import type { AppLogger } from './shared/logger.js';
 
 export interface AppDependencies {
-  env: Pick<Env, 'CORS_ORIGIN'>;
+  env: Pick<Env, 'CORS_ORIGIN' | 'NODE_ENV' | 'JWT_ACCESS_SECRET' | 'JWT_REFRESH_SECRET'>;
   logger: AppLogger;
   database?: Database;
 }
 
 /**
  * The Express application, assembled in the middleware order documented in
- * security.md §5: CORS → helmet → body parse → routes → 404 → error handler.
- *
- * Rate limiting and authentication middleware join this pipeline in Phase 3; they are
- * deliberately absent rather than stubbed, so nothing pretends to be enforced.
+ * security.md §5: CORS → helmet → rate limit → body parse → authenticate →
+ * authorize → controller → 404 → error handler.
  */
 export function createApp({ env, logger, database }: AppDependencies): Express {
   const app = express();
@@ -48,9 +50,19 @@ export function createApp({ env, logger, database }: AppDependencies): Express {
   );
 
   app.use(helmet());
+
+  // Rate limiting runs before body parsing: a flood never reaches JSON decoding.
+  const { general, auth } = createRateLimiters();
+  app.use(general);
+  app.use('/api/v1/auth', auth);
+
   app.use(express.json({ limit: '100kb' }));
 
+  const tokens = createTokenService(env);
+  const { authenticate } = createAuthMiddleware(tokens);
+
   app.use('/api/v1', createHealthRouter(database));
+  app.use('/api/v1', createAuthRouter({ database, env, tokens, authenticate }));
 
   // Order matters: these two are always last.
   app.use(createNotFoundHandler());
