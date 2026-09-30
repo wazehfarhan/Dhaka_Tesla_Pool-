@@ -1,5 +1,6 @@
 import { createApp } from './app.js';
 import { loadEnv, type Env } from './config/env.js';
+import { createDatabase } from './db/client.js';
 import { createLogger } from './shared/logger.js';
 
 /**
@@ -18,7 +19,8 @@ function bootstrap(): void {
   }
 
   const logger = createLogger(env);
-  const app = createApp({ env, logger });
+  const database = createDatabase(env.DATABASE_URL);
+  const app = createApp({ env, logger, database });
 
   const server = app.listen(env.PORT, () => {
     logger.info({ port: env.PORT, nodeEnv: env.NODE_ENV }, 'Dhaka Tesla Pool API listening');
@@ -27,7 +29,10 @@ function bootstrap(): void {
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     process.on(signal, () => {
       logger.info({ signal }, 'Shutting down');
-      server.close((error) => {
+      server.close(async (error) => {
+        await database
+          .close()
+          .catch((err: unknown) => logger.error({ err }, 'Error closing database'));
         if (error) {
           logger.error({ err: error }, 'Graceful shutdown failed');
           process.exit(1);
@@ -39,3 +44,4 @@ function bootstrap(): void {
 }
 
 bootstrap();
+

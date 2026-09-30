@@ -1,0 +1,285 @@
+// Dhaka Tesla Pool — database schema (see docs/database.md, source of truth).
+//
+// Prisma 7 uses the Rust-free client ("query compiler") with a driver adapter
+// (@prisma/adapter-pg); the connection URL is supplied by prisma7.config.ts.
+//
+// Constraint strategy (database.md §9): everything Postgres can express is declared here,
+// and the small residue Prisma cannot express — partial unique indexes and CHECK constraints —
+// is appended to the initial migration as raw SQL. That residue is intentional and reviewed.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Roles are a property of the user row, not a separate table (database.md §10).
+enum Role {
+  PASSENGER
+  DRIVER
+}
+
+enum VehicleStatus {
+  ONLINE
+  OFFLINE
+}
+
+/// Pool lifecycle: OPEN is the pre-acceptance phase (rides are REQUESTED).
+enum PoolStatus {
+  OPEN
+  ACCEPTED
+  DRIVER_ARRIVED
+  STARTED
+  COMPLETED
+  CANCELLED
+}
+
+/// Per-passenger lifecycle — the brief's REQUESTED → MATCHED/ACCEPTED → … chain (PRD §8).
+enum RideStatus {
+  REQUESTED
+  ACCEPTED
+  DRIVER_ARRIVED
+  STARTED
+  COMPLETED
+  CANCELLED
+}
+
+enum MemberStatus {
+  ACTIVE
+  CANCELLED
+}
+
+enum FareStatus {
+  ESTIMATED
+  FINAL
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+}
+
+enum HistoryEntity {
+  RIDE_REQUEST
+  POOL
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String   @db.VarChar(80)
+  email        String   @unique @db.VarChar(255)
+  passwordHash String   @map("password_hash")
+  role         Role
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  vehicles      Vehicle[]
+  rideRequests  RideRequest[]
+  pools         Pool[]
+  refreshTokens RefreshToken[]
+  statusHistory RideStatusHistory[]
+
+  @@index([role])
+  @@map("users")
+}
+
+model Vehicle {
+  id           String        @id @default(uuid()) @db.Uuid
+  ownerId      String        @map("owner_id") @db.Uuid
+  model        String        @db.VarChar(60)
+  plate        String        @unique @db.VarChar(20)
+  /// The Tesla's fixed seat capacity — never exceeded (FR-POOL-004). CHECK 1..8 in migration.
+  seatCapacity Int           @map("seat_capacity") @db.SmallInt
+  status       VehicleStatus @default(OFFLINE)
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  owner User   @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  pools Pool[]
+
+  @@index([ownerId])
+  @@map("vehicles")
+}
+
+model Zone {
+  id   Int    @id @default(autoincrement()) @db.SmallInt
+  name String @unique @db.VarChar(40)
+
+  poolsAsPickup      Pool[]         @relation("PoolPickup")
+  poolsAsDestination Pool[]         @relation("PoolDestination")
+  ridesAsPickup      RideRequest[]  @relation("RidePickup")
+  ridesAsDestination RideRequest[]  @relation("RideDestination")
+  distancesAsA       ZoneDistance[] @relation("ZoneA")
+  distancesAsB       ZoneDistance[] @relation("ZoneB")
+
+  @@map("zones")
+}
+
+/// Symmetric integer-km lookup — the deterministic geography model (ADR-004, PRD §10).
+/// CHECK (zone_a < zone_b) in migration stores each unordered pair exactly once.
+model ZoneDistance {
+  zoneA      Int @map("zone_a") @db.SmallInt
+  zoneB      Int @map("zone_b") @db.SmallInt
+  distanceKm Int @map("distance_km") @db.SmallInt
+
+  zoneARef Zone @relation("ZoneA", fields: [zoneA], references: [id], onDelete: Restrict)
+  zoneBRef Zone @relation("ZoneB", fields: [zoneB], references: [id], onDelete: Restrict)
+
+  @@id([zoneA, zoneB])
+  @@map("zone_distances")
+}
+
+/// Server-side refresh-token revocation — the only stateful part of auth (database.md §3.6).
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  /// SHA-256 of the token's jti; the raw token is never stored.
+  jtiHash   String    @unique @map("jti_hash")
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  rotatedAt DateTime? @map("rotated_at") @db.Timestamptz(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("refresh_tokens")
+}
+
+/// One shared trip on one vehicle. `seat_capacity` is snapshotted from the vehicle at
+/// creation, so a later capacity edit cannot invalidate an open pool's ledger.
+/// Migration adds: CHECK (destination <> pickup), CHECK (seats_taken BETWEEN 0 AND seat_capacity),
+/// CHECK (seat_capacity >= 1) and the partial UNIQUE allowing one OPEN pool per corridor.
+model Pool {
+  id                String     @id @default(uuid()) @db.Uuid
+  driverId          String     @map("driver_id") @db.Uuid
+  vehicleId         String     @map("vehicle_id") @db.Uuid
+  pickupZoneId      Int        @map("pickup_zone_id") @db.SmallInt
+  destinationZoneId Int        @map("destination_zone_id") @db.SmallInt
+  status            PoolStatus @default(OPEN)
+  seatsTaken        Int        @default(0) @map("seats_taken") @db.SmallInt
+  seatCapacity      Int        @map("seat_capacity") @db.SmallInt
+  createdAt         DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  driver          User         @relation(fields: [driverId], references: [id], onDelete: Restrict)
+  vehicle         Vehicle      @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  pickupZone      Zone         @relation("PoolPickup", fields: [pickupZoneId], references: [id], onDelete: Restrict)
+  destinationZone Zone         @relation("PoolDestination", fields: [destinationZoneId], references: [id], onDelete: Restrict)
+  members         PoolMember[]
+  rideRequests    RideRequest[]
+
+  @@index([status, pickupZoneId, destinationZoneId])
+  @@index([driverId, status])
+  @@map("pools")
+}
+
+/// One passenger's ask, lifecycle and ownership key. `pool_id` is NOT NULL: matching happens
+/// at creation, so every request belongs to a pool from the moment it exists.
+model RideRequest {
+  id                String     @id @default(uuid()) @db.Uuid
+  passengerId       String     @map("passenger_id") @db.Uuid
+  poolId            String     @map("pool_id") @db.Uuid
+  pickupZoneId      Int        @map("pickup_zone_id") @db.SmallInt
+  destinationZoneId Int        @map("destination_zone_id") @db.SmallInt
+  seats             Int        @db.SmallInt
+  status            RideStatus @default(REQUESTED)
+  /// Optional client-supplied idempotency key for POST /rides.
+  clientRequestId   String?    @map("client_request_id") @db.Uuid
+  createdAt         DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  passenger       User        @relation(fields: [passengerId], references: [id], onDelete: Restrict)
+  pool            Pool        @relation(fields: [poolId], references: [id], onDelete: Restrict)
+  pickupZone      Zone        @relation("RidePickup", fields: [pickupZoneId], references: [id], onDelete: Restrict)
+  destinationZone Zone        @relation("RideDestination", fields: [destinationZoneId], references: [id], onDelete: Restrict)
+  member          PoolMember?
+  fare            Fare?
+  payment         Payment?
+
+  /// In Postgres NULLs are distinct, so rides without a client id never collide.
+  @@unique([passengerId, clientRequestId])
+  @@index([passengerId, status])
+  @@index([poolId])
+  @@index([passengerId, createdAt(sort: Desc)])
+  @@map("ride_requests")
+}
+
+/// The seat ledger: one row per membership, authoritative for who holds which seats.
+/// `ride_request_id` is plain UNIQUE (not partial): a request belongs to exactly one pool and
+/// a cancelled ride is terminal, so one membership per request forever is the stronger rule.
+model PoolMember {
+  id            String       @id @default(uuid()) @db.Uuid
+  poolId        String       @map("pool_id") @db.Uuid
+  rideRequestId String       @unique @map("ride_request_id") @db.Uuid
+  seats         Int          @db.SmallInt
+  status        MemberStatus @default(ACTIVE)
+  joinedAt      DateTime     @default(now()) @map("joined_at") @db.Timestamptz(6)
+  cancelledAt   DateTime?    @map("cancelled_at") @db.Timestamptz(6)
+
+  pool        Pool        @relation(fields: [poolId], references: [id], onDelete: Restrict)
+  rideRequest RideRequest @relation(fields: [rideRequestId], references: [id], onDelete: Restrict)
+
+  @@index([poolId, status])
+  @@map("pool_members")
+}
+
+/// Individual fare per ride request: ESTIMATED at creation, FINAL at completion.
+/// All amounts are integer poisha; the migration adds CHECK (col >= 0) on every money column.
+model Fare {
+  id                   String     @id @default(uuid()) @db.Uuid
+  rideRequestId        String     @unique @map("ride_request_id") @db.Uuid
+  status               FareStatus @default(ESTIMATED)
+  distanceKm           Int        @map("distance_km") @db.SmallInt
+  baseFarePoisha       Int        @map("base_fare_poisha")
+  distanceChargePoisha Int        @map("distance_charge_poisha")
+  subtotalPoisha       Int        @map("subtotal_poisha")
+  poolDiscountPoisha   Int        @default(0) @map("pool_discount_poisha")
+  totalPoisha          Int        @map("total_poisha")
+  currency             String     @default("BDT") @db.Char(3)
+  computedAt           DateTime   @default(now()) @map("computed_at") @db.Timestamptz(6)
+  finalizedAt          DateTime?  @map("finalized_at") @db.Timestamptz(6)
+
+  rideRequest RideRequest @relation(fields: [rideRequestId], references: [id], onDelete: Restrict)
+
+  @@map("fares")
+}
+
+/// Simulated payment: created PENDING inside the completion transaction, marked PAID by the
+/// passenger. One row per ride, ever (UNIQUE ride_request_id).
+model Payment {
+  id            String        @id @default(uuid()) @db.Uuid
+  rideRequestId String        @unique @map("ride_request_id") @db.Uuid
+  amountPoisha  Int           @map("amount_poisha")
+  status        PaymentStatus @default(PENDING)
+  method        String        @default("SIMULATED") @db.VarChar(16)
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  paidAt        DateTime?     @map("paid_at") @db.Timestamptz(6)
+
+  rideRequest RideRequest @relation(fields: [rideRequestId], references: [id], onDelete: Restrict)
+
+  @@map("payments")
+}
+
+/// Append-only transition trail for rides and pools (polymorphic: entity_type + entity_id).
+/// No FK on `entity_id` by design — see database.md §8 for the trade-off.
+model RideStatusHistory {
+  id         String        @id @default(uuid()) @db.Uuid
+  entityType HistoryEntity @map("entity_type")
+  entityId   String        @map("entity_id") @db.Uuid
+  fromStatus String?       @map("from_status") @db.VarChar(20)
+  toStatus   String        @map("to_status") @db.VarChar(20)
+  changedBy  String?       @map("changed_by") @db.Uuid
+  reason     String?       @db.VarChar(60)
+  createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  actor User? @relation(fields: [changedBy], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId, createdAt])
+  @@map("ride_status_history")
+}
+
+

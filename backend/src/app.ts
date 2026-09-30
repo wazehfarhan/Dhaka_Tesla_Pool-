@@ -4,6 +4,7 @@ import express, { type Express } from 'express';
 import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
 import type { Env } from './config/env.js';
+import type { Database } from './db/client.js';
 import { createErrorHandler, createNotFoundHandler } from './middleware/error-handler.js';
 import { createHealthRouter } from './modules/health/health.routes.js';
 import type { AppLogger } from './shared/logger.js';
@@ -11,6 +12,7 @@ import type { AppLogger } from './shared/logger.js';
 export interface AppDependencies {
   env: Pick<Env, 'CORS_ORIGIN'>;
   logger: AppLogger;
+  database?: Database;
 }
 
 /**
@@ -20,7 +22,7 @@ export interface AppDependencies {
  * Rate limiting and authentication middleware join this pipeline in Phase 3; they are
  * deliberately absent rather than stubbed, so nothing pretends to be enforced.
  */
-export function createApp({ env, logger }: AppDependencies): Express {
+export function createApp({ env, logger, database }: AppDependencies): Express {
   const app = express();
 
   app.disable('x-powered-by');
@@ -48,7 +50,7 @@ export function createApp({ env, logger }: AppDependencies): Express {
   app.use(helmet());
   app.use(express.json({ limit: '100kb' }));
 
-  app.use('/api/v1', createHealthRouter());
+  app.use('/api/v1', createHealthRouter(database));
 
   // Order matters: these two are always last.
   app.use(createNotFoundHandler());

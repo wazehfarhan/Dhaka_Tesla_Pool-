@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { Database } from '../../db/client.js';
 
 /**
  * Probes documented in api.md §9.
@@ -6,7 +7,7 @@ import { Router } from 'express';
  * These deliberately return a plain body (not the business error envelope): they are
  * infrastructure endpoints consumed by Docker healthchecks and the hosting platform.
  */
-export function createHealthRouter(): Router {
+export function createHealthRouter(database?: Database): Router {
   const router = Router();
 
   /** Liveness — the process is up. No database call, so a database outage cannot restart us. */
@@ -19,15 +20,31 @@ export function createHealthRouter(): Router {
 
   /**
    * Readiness — are dependencies reachable?
-   * The `SELECT 1` database check is wired up in Phase 2 (todo.md). Until then this reports
-   * the truth (503 / not ready) rather than pretending to be healthy.
+   * api.md §9: `200` if `SELECT 1` succeeds, else `503`.
    */
-  router.get('/health/ready', (_req, res) => {
-    res.status(503).json({
-      status: 'not_ready',
-      checks: { database: 'not_configured_until_phase_2' },
-    });
+  router.get('/health/ready', async (_req, res) => {
+    if (!database) {
+      res.status(503).json({
+        status: 'not_ready',
+        checks: { database: 'disconnected' },
+      });
+      return;
+    }
+
+    try {
+      await database.ping();
+      res.status(200).json({
+        status: 'ready',
+        checks: { database: 'connected' },
+      });
+    } catch {
+      res.status(503).json({
+        status: 'not_ready',
+        checks: { database: 'unreachable' },
+      });
+    }
   });
 
   return router;
 }
+
