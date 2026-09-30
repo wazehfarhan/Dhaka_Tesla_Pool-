@@ -10,10 +10,10 @@
  * The status sentence sits in an `aria-live="polite"` region so "Driver arrived"
  * is announced when it changes (ui-ux §8).
  *
- * Cancel and Pay are rendered **disabled with an explicit note** rather than as
- * buttons that would 404: `POST /rides/:id/cancel` lands in Phase 8 and the
- * payments endpoints (`api.md` §8) are not implemented yet. A dead-looking
- * button that explains itself is honest; a button that fails is not.
+ * Cancel and Pay are real mutations now (api.md §5.4 and §8): each posts to the
+ * documented endpoint and then re-reads the ride, so the screen shows the
+ * server's answer. Both are offered only where the API allows them — Pay once
+ * the pool completed, Cancel until the driver starts the trip (ui-ux §3).
  */
 
 import { useCallback, useState } from 'react';
@@ -34,7 +34,7 @@ import {
   StatusChip,
 } from '@/components/ui';
 import { usePolling } from '@/hooks/use-polling';
-import { fetchRideDetail } from '@/lib/api';
+import { cancelRide, fetchRideDetail, simulatePayment } from '@/lib/api';
 import { ApiError, messageForError } from '@/lib/errors';
 import {
   formatBdt,
@@ -56,7 +56,9 @@ export default function RideDetailPage() {
   const [ride, setRide] = useState<RideDetail | null>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [busy, setBusy] = useState<'cancel' | 'pay' | null>(null);
 
   const load = useCallback(async () => {
     if (rideId === '') return;
@@ -81,6 +83,38 @@ export default function RideDetailPage() {
 
   const pollingEnabled = !notFound && (ride === null || !isTerminal(ride.status));
   const { failed, refresh } = usePolling(pollingEnabled, load);
+
+  /**
+   * Cancel and Pay (api.md §5.4 / §8) both re-read the ride afterwards rather
+   * than patching local state: the API's response is the truth, and a refusal
+   * (`409 RIDE_ALREADY_STARTED`, `409 ILLEGAL_STATE_TRANSITION`) is shown as
+   * human copy from `errors.ts` while the screen stays correct.
+   */
+  async function handleCancel() {
+    setBusy('cancel');
+    setActionError(null);
+    try {
+      await cancelRide(rideId);
+      await load();
+    } catch (caught) {
+      setActionError(messageForError(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handlePay() {
+    setBusy('pay');
+    setActionError(null);
+    try {
+      await simulatePayment(rideId);
+      await load();
+    } catch (caught) {
+      setActionError(messageForError(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
 
   const loading = !ready && error === null && !notFound;
 
@@ -114,6 +148,7 @@ export default function RideDetailPage() {
       />
 
       {error !== null && <ErrorBanner message={error} onRetry={refresh} />}
+      {actionError !== null && <ErrorBanner message={actionError} />}
 
       {loading && (
         <Card>
@@ -124,15 +159,30 @@ export default function RideDetailPage() {
         </Card>
       )}
 
-      {ride !== null && <RideDetailBody ride={ride} />}
+      {ride !== null && (
+        <RideDetailBody ride={ride} busy={busy} onCancel={handleCancel} onPay={handlePay} />
+      )}
     </div>
   );
 }
 
 /** Everything below the heading, once the ride has loaded. */
-function RideDetailBody({ ride }: { ride: RideDetail }) {
+function RideDetailBody({
+  ride,
+  busy,
+  onCancel,
+  onPay,
+}: {
+  ride: RideDetail;
+  busy: 'cancel' | 'pay' | null;
+  onCancel: () => void;
+  onPay: () => void;
+}) {
   const cancellable = CANCELLABLE.has(ride.status);
   const completed = ride.status === 'COMPLETED';
+  const paid = ride.payment?.status === 'PAID';
+  /** A payment row only exists after completion, so this is the whole story. */
+  const payable = completed && ride.payment !== null && !paid;
 
   return (
     <>
@@ -202,8 +252,18 @@ function RideDetailBody({ ride }: { ride: RideDetail }) {
                       : 'Unpaid'
                 }
               />
-              <Button type="button" disabled title="Payments are not implemented in the API yet">
-                Pay (simulated)
+              <Button
+                type="button"
+                pending={busy === 'pay'}
+                disabled={!payable}
+                onClick={onPay}
+                title={
+                  payable
+                    ? 'Marks the payment PAID — simulated, no real gateway (api.md §8)'
+                    : 'Payment opens once the trip has completed'
+                }
+              >
+                {paid ? 'Paid' : 'Pay (simulated)'}
               </Button>
             </div>
 
@@ -215,13 +275,21 @@ function RideDetailBody({ ride }: { ride: RideDetail }) {
           </Card>
 
           {cancellable && (
-            <Card title="Cancel">
+            <Card
+              title="Cancel"
+              subtitle="Freeing your seat immediately — the driver is notified by the status change (PRD §14)."
+            >
               <div className="flex flex-wrap items-center gap-3">
-                <Button type="button" variant="danger" disabled title="Cancel is Phase 8 work">
+                <Button
+                  type="button"
+                  variant="danger"
+                  pending={busy === 'cancel'}
+                  onClick={onCancel}
+                >
                   Cancel ride
                 </Button>
                 <span className="text-xs text-slate-500">
-                  Lands with Phase 8 (<code>POST /rides/:id/cancel</code>).
+                  Only possible before the driver starts the trip.
                 </span>
               </div>
             </Card>

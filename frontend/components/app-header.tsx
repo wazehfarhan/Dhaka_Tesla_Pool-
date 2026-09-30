@@ -7,7 +7,9 @@
  *
  * The nav is derived from `status`/`user` rather than from the URL: a guest sees
  * Sign in/Register, a passenger sees the three passenger screens, a driver sees
- * the driver dashboard (the rest of the driver nav arrives with Phase 5).
+ * the dashboard and their trip history (ui-ux §4). The pool detail screen is
+ * reached from the dashboard's queue, not from the nav — it is one step of a
+ * trip, not a section.
  */
 
 import { useState } from 'react';
@@ -27,7 +29,10 @@ const PASSENGER_NAV: NavItem[] = [
   { href: '/passenger/rides', label: 'My rides' },
 ];
 
-const DRIVER_NAV: NavItem[] = [{ href: '/driver', label: 'Dashboard' }];
+const DRIVER_NAV: NavItem[] = [
+  { href: '/driver', label: 'Dashboard' },
+  { href: '/driver/history', label: 'History' },
+];
 
 export function AppHeader() {
   const { status, user, signOut } = useAuth();

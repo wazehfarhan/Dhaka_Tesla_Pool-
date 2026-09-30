@@ -1,85 +1,363 @@
 'use client';
 
 /**
- * `/driver` — an honest placeholder.
+ * `/driver` — the driver dashboard (ui-ux §4): garage with the **online toggle**,
+ * the **active trip**, and the **Requests queue**, all from one page of
+ * `GET /driver/pools` (api.md §6.1) plus `GET /vehicles` (§7.1).
  *
- * ui-ux §4 specifies this dashboard around endpoints that **do not exist yet**:
- * the vehicle registry and online toggle (`api.md` §7) and the driver pool queue,
- * detail and transition endpoints (§6) are Phase 5. Rather than inventing data or
- * shipping buttons that 404, this screen states exactly what is missing and what
- * already works — a driver can sign in and is correctly kept out of the
- * passenger screens.
+ * Polling: the queue and the active trip refresh every 3 s (ui-ux §7) so a
+ * passenger's request appears without a refresh, and the poll stops once nothing
+ * is left to watch (no live pool). Every sentence is derived from a status the
+ * API returned — nothing here is mocked.
  */
 
-import { Button, Card, Notice, PageHeading } from '@/components/ui';
+import { useCallback, useState } from 'react';
+import Link from 'next/link';
+import { PollIndicator } from '@/components/poll-indicator';
 import { useAuth } from '@/components/auth-provider';
-import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import {
+  Button,
+  Card,
+  DataList,
+  DataRow,
+  EmptyState,
+  ErrorBanner,
+  Notice,
+  PageHeading,
+  Skeleton,
+  StatusChip,
+  TextField,
+} from '@/components/ui';
+import { usePolling } from '@/hooks/use-polling';
+import { createVehicle, fetchDriverPools, fetchVehicles, setVehicleStatus } from '@/lib/api';
+import { messageForError } from '@/lib/errors';
+import {
+  formatDateTime,
+  isPoolTerminal,
+  nextDriverAction,
+  poolStatusDetail,
+  poolStatusLabel,
+  seatsLabel,
+} from '@/lib/format';
+import type { DriverPoolListItem, VehicleSummary } from '@/lib/types';
 
-const MISSING_ENDPOINTS: ReadonlyArray<{ method: string; path: string; purpose: string }> = [
-  { method: 'GET', path: '/vehicles', purpose: 'the driver’s Teslas' },
-  { method: 'PATCH', path: '/vehicles/:id', purpose: 'the online/offline toggle' },
-  { method: 'GET', path: '/driver/pools', purpose: 'the OPEN queue and history' },
-  { method: 'GET', path: '/driver/pools/:id', purpose: 'roster and per-passenger fares' },
-  { method: 'POST', path: '/driver/pools/:id/accept', purpose: 'OPEN → ACCEPTED' },
-  { method: 'POST', path: '/driver/pools/:id/arrive', purpose: 'ACCEPTED → DRIVER_ARRIVED' },
-  { method: 'POST', path: '/driver/pools/:id/start', purpose: 'DRIVER_ARRIVED → STARTED' },
-  {
-    method: 'POST',
-    path: '/driver/pools/:id/complete',
-    purpose: 'STARTED → COMPLETED (final fare)',
-  },
-];
+interface DashboardState {
+  vehicles: VehicleSummary[];
+  pools: DriverPoolListItem[];
+  ready: boolean;
+  error: string | null;
+}
 
 export default function DriverDashboardPage() {
-  const { user, signOut } = useAuth();
-  const router = useRouter();
-  const [pending, setPending] = useState(false);
+  const { user } = useAuth();
+  const [state, setState] = useState<DashboardState>({
+    vehicles: [],
+    pools: [],
+    ready: false,
+    error: null,
+  });
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busyVehicle, setBusyVehicle] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({ model: '', plate: '', seatCapacity: '3' });
 
-  async function handleSignOut() {
-    setPending(true);
-    await signOut();
-    router.push('/login');
+  const load = useCallback(async () => {
+    try {
+      // Two independent reads, in parallel — both are cheap and owner-scoped.
+      const [vehicles, pools] = await Promise.all([
+        fetchVehicles(),
+        fetchDriverPools({ limit: 20 }),
+      ]);
+      setState({ vehicles, pools: pools.pools, ready: true, error: null });
+    } catch (caught) {
+      setState((current) => ({ ...current, error: messageForError(caught) }));
+      throw caught;
+    }
+  }, []);
+
+  // The dashboard always polls: a passenger's request can land at any moment, and
+  // that is exactly the "Requests queue" the demo watches (ui-ux §7).
+  const { failed, refresh } = usePolling(true, load);
+
+  const activeTrip =
+    state.pools.find((pool) => pool.status !== 'OPEN' && !isPoolTerminal(pool.status)) ?? null;
+  const queue = state.pools.filter((pool) => pool.status === 'OPEN');
+  const loading = !state.ready && state.error === null;
+  const onlineVehicle = state.vehicles.find((vehicle) => vehicle.status === 'ONLINE') ?? null;
+
+  async function toggleVehicle(vehicle: VehicleSummary) {
+    setBusyVehicle(vehicle.id);
+    setActionError(null);
+    try {
+      await setVehicleStatus(vehicle.id, vehicle.status === 'ONLINE' ? 'OFFLINE' : 'ONLINE');
+      await load();
+    } catch (caught) {
+      setActionError(messageForError(caught));
+    } finally {
+      setBusyVehicle(null);
+    }
+  }
+
+  async function addVehicle(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAdding(true);
+    setActionError(null);
+    try {
+      await createVehicle({
+        model: form.model.trim(),
+        plate: form.plate.trim(),
+        seatCapacity: Number(form.seatCapacity),
+      });
+      setForm({ model: '', plate: '', seatCapacity: '3' });
+      await load();
+    } catch (caught) {
+      setActionError(messageForError(caught));
+    } finally {
+      setAdding(false);
+    }
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <PageHeading
         title={`Hello, ${user?.name ?? 'driver'}`}
-        description="Driver screens arrive with Phase 5 — the API they need is not built yet."
-        actions={
-          <Button variant="secondary" pending={pending} onClick={handleSignOut}>
-            Sign out
-          </Button>
-        }
+        description="Your Teslas, the requests waiting for you, and the trip you are running."
+        actions={<PollIndicator failed={failed} />}
       />
 
-      <Notice tone="warn">
-        Nothing on this screen is mocked: a driver login, a role-guarded route and a real
-        <code className="mx-1">403</code> from the API are all working today.
-      </Notice>
+      {state.error !== null && <ErrorBanner message={state.error} onRetry={refresh} />}
+      {actionError !== null && <ErrorBanner message={actionError} />}
 
-      <Card
-        title="What is missing"
-        subtitle="Each row is a documented endpoint (api.md §6–§7) with no implementation yet."
-      >
+      {onlineVehicle === null && state.ready && (
+        <Notice tone="warn">
+          No Tesla is <strong>online</strong>, so passengers cannot request a ride on your routes
+          (api.md §7.2). Go online below to open your corridors.
+        </Notice>
+      )}
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <GarageCard
+          loading={loading}
+          vehicles={state.vehicles}
+          busyVehicle={busyVehicle}
+          onToggle={toggleVehicle}
+          adding={adding}
+          form={form}
+          onFormChange={setForm}
+          onSubmit={addVehicle}
+        />
+
+        <div className="space-y-6">
+          <ActiveTripCard loading={loading} trip={activeTrip} />
+          <RequestsCard loading={loading} queue={queue} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The garage (api.md §7): every Tesla with its online toggle, plus the add form. */
+function GarageCard({
+  loading,
+  vehicles,
+  busyVehicle,
+  onToggle,
+  adding,
+  form,
+  onFormChange,
+  onSubmit,
+}: {
+  loading: boolean;
+  vehicles: VehicleSummary[];
+  busyVehicle: string | null;
+  onToggle: (vehicle: VehicleSummary) => void;
+  adding: boolean;
+  form: { model: string; plate: string; seatCapacity: string };
+  onFormChange: (form: { model: string; plate: string; seatCapacity: string }) => void;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <Card
+      title="My Teslas"
+      subtitle="A Tesla must be online before passengers can request a ride (api.md §7.2)."
+    >
+      {loading && (
+        <div className="space-y-2" aria-busy="true">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-2/3" />
+        </div>
+      )}
+
+      {!loading && vehicles.length === 0 && (
+        <EmptyState
+          title="No Tesla yet"
+          description="Add your car below — it starts offline so you decide when to take requests."
+        />
+      )}
+
+      {!loading && vehicles.length > 0 && (
         <ul className="divide-y divide-slate-100 text-sm">
-          {MISSING_ENDPOINTS.map((endpoint) => (
-            <li key={`${endpoint.method} ${endpoint.path}`} className="flex flex-wrap gap-2 py-2">
-              <span className="font-mono text-xs text-slate-500">{endpoint.method}</span>
-              <span className="font-mono text-xs text-slate-800">{endpoint.path}</span>
-              <span className="text-slate-600">— {endpoint.purpose}</span>
+          {vehicles.map((vehicle) => (
+            <li key={vehicle.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+              <div>
+                <p className="font-medium text-slate-900">
+                  {vehicle.model} <span className="font-mono text-xs">{vehicle.plate}</span>
+                </p>
+                <p className="text-xs text-slate-500">{seatsLabel(vehicle.seatCapacity)}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <StatusChip
+                  status={vehicle.status}
+                  label={vehicle.status === 'ONLINE' ? 'Online' : 'Offline'}
+                />
+                <Button
+                  variant={vehicle.status === 'ONLINE' ? 'secondary' : 'primary'}
+                  pending={busyVehicle === vehicle.id}
+                  onClick={() => onToggle(vehicle)}
+                >
+                  {vehicle.status === 'ONLINE' ? 'Go offline' : 'Go online'}
+                </Button>
+              </div>
             </li>
           ))}
         </ul>
-      </Card>
+      )}
 
-      <Card title="Meanwhile">
-        <p className="text-sm text-slate-700">
-          The passenger flow is complete end to end: a passenger can sign in, see a live fare for a
-          corridor, request a ride, and follow the status timeline while polling every 3 s.
+      <form className="mt-4 space-y-3 border-t border-slate-100 pt-4" onSubmit={onSubmit}>
+        <p className="text-sm font-medium text-slate-700">Add a Tesla</p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <TextField
+            label="Model"
+            name="model"
+            value={form.model}
+            placeholder="Tesla Model 3"
+            onChange={(event) => onFormChange({ ...form, model: event.target.value })}
+            required
+          />
+          <TextField
+            label="Plate"
+            name="plate"
+            value={form.plate}
+            placeholder="DHK-TSL-001"
+            onChange={(event) => onFormChange({ ...form, plate: event.target.value })}
+            required
+          />
+          <TextField
+            label="Seats"
+            name="seatCapacity"
+            type="number"
+            min={1}
+            max={8}
+            value={form.seatCapacity}
+            onChange={(event) => onFormChange({ ...form, seatCapacity: event.target.value })}
+            required
+          />
+        </div>
+        <Button type="submit" pending={adding}>
+          Add vehicle
+        </Button>
+      </form>
+    </Card>
+  );
+}
+
+/** The trip the driver is actually running: the latest non-`OPEN` live pool. */
+function ActiveTripCard({ loading, trip }: { loading: boolean; trip: DriverPoolListItem | null }) {
+  if (loading) {
+    return (
+      <Card title="Current trip">
+        <div className="space-y-2" aria-busy="true">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-1/2" />
+        </div>
+      </Card>
+    );
+  }
+
+  if (trip === null) {
+    return (
+      <Card title="Current trip">
+        <p className="text-sm text-slate-600">
+          Nothing running. Accept a request below to start a trip.
         </p>
       </Card>
-    </div>
+    );
+  }
+
+  const next = nextDriverAction(trip.status);
+  return (
+    <Card title="Current trip" subtitle={poolStatusDetail(trip.status)}>
+      <DataList>
+        <DataRow label="Route">
+          <Link className="text-emerald-700 hover:underline" href={`/driver/pools/${trip.id}`}>
+            {trip.pickupZone} → {trip.destinationZone}
+          </Link>
+        </DataRow>
+        <DataRow label="Status">
+          <StatusChip status={trip.status} label={poolStatusLabel(trip.status)} />
+        </DataRow>
+        <DataRow label="Seats">
+          {trip.seatsTaken}/{trip.seatCapacity}
+        </DataRow>
+        <DataRow label="Passengers">
+          {trip.members.map((member) => member.passenger).join(', ') || '—'}
+        </DataRow>
+      </DataList>
+      <div className="mt-3">
+        <Link href={`/driver/pools/${trip.id}`}>
+          <Button>{next === null ? 'Open pool' : next.label}</Button>
+        </Link>
+      </div>
+    </Card>
+  );
+}
+
+/** The Requests queue — the `OPEN` pools, refreshed every 3 s (api.md §6.1). */
+function RequestsCard({ loading, queue }: { loading: boolean; queue: DriverPoolListItem[] }) {
+  return (
+    <Card
+      title="Requests"
+      subtitle="Seats are already held while a pool waits for you."
+      actions={
+        <Link className="text-sm text-emerald-700" href="/driver/history">
+          History
+        </Link>
+      }
+    >
+      {loading && (
+        <div className="space-y-2" aria-busy="true">
+          <Skeleton className="h-4 w-full" />
+        </div>
+      )}
+
+      {!loading && queue.length === 0 && (
+        <EmptyState
+          title="No open requests"
+          description="When a passenger requests one of your corridors, it appears here with the seats already reserved."
+        />
+      )}
+
+      {!loading && queue.length > 0 && (
+        <ul className="divide-y divide-slate-100 text-sm">
+          {queue.map((pool) => (
+            <li key={pool.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+              <div>
+                <Link
+                  className="font-medium text-emerald-700 hover:underline"
+                  href={`/driver/pools/${pool.id}`}
+                >
+                  {pool.pickupZone} → {pool.destinationZone}
+                </Link>
+                <p className="text-xs text-slate-500">
+                  {formatDateTime(pool.createdAt)} · {pool.seatsTaken}/{pool.seatCapacity} seats ·{' '}
+                  {pool.members.map((member) => member.passenger).join(', ')}
+                </p>
+              </div>
+              <StatusChip status={pool.status} label={poolStatusLabel(pool.status)} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }

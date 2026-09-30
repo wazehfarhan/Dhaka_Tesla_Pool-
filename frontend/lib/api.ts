@@ -20,12 +20,19 @@ import { clearAccessToken, getAccessToken, setAccessToken } from './token-store'
 import type {
   ApiEnvelope,
   ApiErrorBody,
+  CancelledRide,
   CreatedRide,
   CreateRideRequest,
+  DriverPoolDetail,
+  DriverPoolListItem,
+  DriverTransitionResponse,
   FareEstimate,
+  Payment,
   RideDetail,
   RideListItem,
   UserProfile,
+  VehicleStatusResponse,
+  VehicleSummary,
   Zone,
 } from './types';
 
@@ -246,5 +253,120 @@ export async function fetchRides(params: {
 /** `GET /rides/:id` — the polling target for the detail screen. */
 export async function fetchRideDetail(rideId: string): Promise<RideDetail> {
   const { data } = await call<RideDetail>(`/rides/${encodeURIComponent(rideId)}`);
+  return data;
+}
+
+/**
+ * `POST /rides/:id/cancel` (api.md §5.4) — pre-start only. The API answers the
+ * documented `409 RIDE_ALREADY_STARTED` / `409 ILLEGAL_STATE_TRANSITION`, which
+ * `errors.ts` already maps to human copy.
+ */
+export async function cancelRide(rideId: string, reason?: string): Promise<CancelledRide> {
+  const { data } = await call<CancelledRide>(`/rides/${encodeURIComponent(rideId)}/cancel`, {
+    method: 'POST',
+    body: reason === undefined ? {} : { reason },
+  });
+  return data;
+}
+
+/** `GET /rides/:id/payment` — a `404` until the pool completes (api.md §8). */
+export async function fetchPayment(rideId: string): Promise<Payment> {
+  const { data } = await call<Payment>(`/rides/${encodeURIComponent(rideId)}/payment`);
+  return data;
+}
+
+/** `POST /rides/:id/payment/simulate` — idempotent `PENDING → PAID` (api.md §8). */
+export async function simulatePayment(rideId: string): Promise<Payment> {
+  const { data } = await call<Payment>(`/rides/${encodeURIComponent(rideId)}/payment/simulate`, {
+    method: 'POST',
+    body: {},
+  });
+  return data;
+}
+
+/* ---------------------------------------------------------------- driver ---- */
+
+/** `GET /vehicles` — the caller's garage (api.md §7.1). */
+export async function fetchVehicles(): Promise<VehicleSummary[]> {
+  const { data } = await call<VehicleSummary[]>('/vehicles');
+  return data;
+}
+
+export interface CreateVehicleInput {
+  model: string;
+  plate: string;
+  seatCapacity: number;
+}
+
+/** `POST /vehicles` → `201`; a new car always starts `OFFLINE` (api.md §7.1). */
+export async function createVehicle(input: CreateVehicleInput): Promise<VehicleSummary> {
+  const { data } = await call<VehicleSummary>('/vehicles', { method: 'POST', body: input });
+  return data;
+}
+
+/** `PATCH /vehicles/:id` — the online/offline toggle (api.md §7.2). */
+export async function setVehicleStatus(
+  vehicleId: string,
+  status: 'ONLINE' | 'OFFLINE',
+): Promise<VehicleStatusResponse> {
+  const { data } = await call<VehicleStatusResponse>(`/vehicles/${encodeURIComponent(vehicleId)}`, {
+    method: 'PATCH',
+    body: { status },
+  });
+  return data;
+}
+
+export interface DriverPoolPage {
+  pools: DriverPoolListItem[];
+  meta: { page: number; limit: number; total: number };
+}
+
+/**
+ * `GET /driver/pools?status=` (api.md §6.1) — one endpoint serving all three
+ * driver views: `?status=OPEN` is the Requests queue, the latest non-terminal
+ * pool is the active trip, `?status=COMPLETED` is history (FR-HISTORY-002).
+ */
+export async function fetchDriverPools(
+  params: {
+    status?: string;
+    page?: number;
+    limit?: number;
+  } = {},
+): Promise<DriverPoolPage> {
+  const search = new URLSearchParams();
+  if (params.status !== undefined && params.status !== '') search.set('status', params.status);
+  search.set('page', String(params.page ?? 1));
+  search.set('limit', String(params.limit ?? 20));
+
+  const { data, meta } = await call<DriverPoolListItem[]>(`/driver/pools?${search.toString()}`);
+  return {
+    pools: data,
+    meta: meta ?? { page: 1, limit: data.length, total: data.length },
+  };
+}
+
+/** `GET /driver/pools/:id` — roster, per-member fares and the pool timeline. */
+export async function fetchDriverPool(poolId: string): Promise<DriverPoolDetail> {
+  const { data } = await call<DriverPoolDetail>(`/driver/pools/${encodeURIComponent(poolId)}`);
+  return data;
+}
+
+/** The five driver actions, named exactly as the routes name them (api.md §6.3–6.5). */
+export type DriverAction = 'accept' | 'arrive' | 'start' | 'complete' | 'cancel';
+
+/**
+ * `POST /driver/pools/:id/{action}` — the trip progression plus the pre-start
+ * cancel. The response is the pool *after* the transition with the roster
+ * re-read in the same transaction, so the caller can render the new state
+ * without a second round trip (and without guessing what the cascade did).
+ */
+export async function transitionPool(
+  poolId: string,
+  action: DriverAction,
+): Promise<DriverTransitionResponse> {
+  const { data } = await call<DriverTransitionResponse>(
+    `/driver/pools/${encodeURIComponent(poolId)}/${action}`,
+    { method: 'POST', body: {} },
+  );
   return data;
 }

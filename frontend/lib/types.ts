@@ -135,6 +135,106 @@ export interface RideDetail {
   createdAt: string;
 }
 
+/** `GET`/`POST /rides/:id/payment` and `POST …/payment/simulate` (api.md §8). */
+export interface Payment {
+  id: string;
+  rideId: string;
+  amountPoisha: number;
+  currency: string;
+  status: PaymentStatus;
+  /** `SIMULATED` in the MVP — there is no real gateway (PRD §13). */
+  method: string;
+  paidAt: string | null;
+}
+
+/** `POST /rides/:id/cancel` (api.md §5.4) — the ride plus its pool's new state. */
+export interface CancelledRide {
+  id: string;
+  status: RideStatus;
+  poolId: string;
+  poolStatus: PoolStatus;
+  seats: number;
+  reason: string | null;
+  createdAt: string;
+}
+
+/* ---------------------------------------------------------------- driver ---- */
+
+export type VehicleStatus = 'ONLINE' | 'OFFLINE';
+
+/** `GET`/`POST /vehicles` row (api.md §7.1) — the driver's garage. */
+export interface VehicleSummary {
+  id: string;
+  model: string;
+  plate: string;
+  seatCapacity: number;
+  status: VehicleStatus;
+}
+
+/** `PATCH /vehicles/:id` answers only the id and the new status (api.md §7.2). */
+export interface VehicleStatusResponse {
+  id: string;
+  status: VehicleStatus;
+}
+
+/** One member of a driver pool roster — passenger, seats, status, money (api.md §6.2). */
+export interface PoolMemberView {
+  rideId: string;
+  passenger: string;
+  seats: number;
+  status: RideStatus;
+  fare: {
+    status: FareStatus;
+    subtotalPoisha: number;
+    poolDiscountPoisha: number;
+    totalPoisha: number;
+  } | null;
+  payment: { status: PaymentStatus; amountPoisha: number } | null;
+}
+
+/** One row of `GET /driver/pools` — the Requests queue, the active trip, history. */
+export interface DriverPoolListItem {
+  id: string;
+  status: PoolStatus;
+  pickupZone: string;
+  destinationZone: string;
+  distanceKm: number | null;
+  seatsTaken: number;
+  seatCapacity: number;
+  members: Array<{ passenger: string; seats: number; status: RideStatus }>;
+  createdAt: string;
+}
+
+/** `GET /driver/pools/:id` — pool + full roster + the pool's own timeline. */
+export interface DriverPoolDetail {
+  id: string;
+  status: PoolStatus;
+  pickupZone: string;
+  destinationZone: string;
+  distanceKm: number | null;
+  seatsTaken: number;
+  seatCapacity: number;
+  members: PoolMemberView[];
+  timeline: Array<{
+    fromStatus: string | null;
+    toStatus: string;
+    reason: string | null;
+    createdAt: string;
+  }>;
+  createdAt: string;
+}
+
+/**
+ * The body of every `POST /driver/pools/:id/{action}` (api.md §6.3–6.5): the pool
+ * after the transition plus the roster re-read inside the same transaction, so
+ * the UI never has to guess what a cascade did.
+ */
+export interface DriverTransitionResponse {
+  id: string;
+  status: PoolStatus;
+  members: PoolMemberView[];
+}
+
 /** Shared envelope (api.md §1). Lists add `meta`; errors replace `data`. */
 export interface ApiEnvelope<T> {
   success: true;

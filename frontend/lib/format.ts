@@ -89,3 +89,63 @@ export const RIDE_PROGRESSION: readonly string[] = [
 export function seatsLabel(seats: number): string {
   return seats === 1 ? '1 seat' : `${seats} seats`;
 }
+
+/* ---------------------------------------------------------------- driver ---- */
+
+/**
+ * The driver's next legal action, derived from the pool status alone.
+ *
+ * ui-ux §3 requires the buttons to be "enabled only by current state", and the
+ * API refuses anything out of order with `409 ILLEGAL_STATE_TRANSITION` — so the
+ * UI mirrors the backend's `DRIVER_TRANSITIONS` table here. The API stays
+ * authoritative: this only avoids offering a button that would fail.
+ */
+const NEXT_DRIVER_ACTION: Record<string, 'accept' | 'arrive' | 'start' | 'complete'> = {
+  OPEN: 'accept',
+  ACCEPTED: 'arrive',
+  DRIVER_ARRIVED: 'start',
+  STARTED: 'complete',
+};
+
+const DRIVER_ACTION_LABEL: Record<'accept' | 'arrive' | 'start' | 'complete', string> = {
+  accept: 'Accept pool',
+  arrive: 'I have arrived',
+  start: 'Start trip',
+  complete: 'Complete trip',
+};
+
+export function nextDriverAction(
+  status: string,
+): { action: 'accept' | 'arrive' | 'start' | 'complete'; label: string } | null {
+  const action = NEXT_DRIVER_ACTION[status];
+  if (action === undefined) return null;
+  return { action, label: DRIVER_ACTION_LABEL[action] };
+}
+
+/** The driver may abandon a pool only before `STARTED` (PRD §14, api.md §6.5). */
+export function canDriverCancel(status: string): boolean {
+  return status === 'OPEN' || status === 'ACCEPTED' || status === 'DRIVER_ARRIVED';
+}
+
+/** Pool-status copy in the driver's voice — the same words the queue and detail share. */
+const POOL_STATUS_COPY: Record<string, { label: string; detail: string }> = {
+  OPEN: { label: 'New request', detail: 'Seats held, waiting for you to accept.' },
+  ACCEPTED: { label: 'On the way', detail: 'You accepted — head to the pickup zone.' },
+  DRIVER_ARRIVED: { label: 'Arrived', detail: 'Waiting for you to start the trip.' },
+  STARTED: { label: 'In progress', detail: 'Passengers on board.' },
+  COMPLETED: { label: 'Completed', detail: 'Trip done — fares final, payments pending.' },
+  CANCELLED: { label: 'Cancelled', detail: 'This trip was cancelled.' },
+};
+
+export function poolStatusLabel(status: string): string {
+  return (POOL_STATUS_COPY[status] ?? { label: status, detail: '' }).label;
+}
+
+export function poolStatusDetail(status: string): string {
+  return (POOL_STATUS_COPY[status] ?? { label: status, detail: '' }).detail;
+}
+
+/** A pool is live until it is completed or cancelled — what polling keys off. */
+export function isPoolTerminal(status: string): boolean {
+  return status === 'COMPLETED' || status === 'CANCELLED';
+}
