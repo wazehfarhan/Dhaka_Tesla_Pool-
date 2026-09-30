@@ -18,7 +18,7 @@ Conventions: `<type>(<scope>): <description>` commits · every task = at least o
 
 **DoD:** reviewer approves docs; traceability has no unexplained "Missing" rows; all Open Decisions (D-01…D-06) closed.
 
-## Phase 1 — Repository Setup *(deps: Phase 0)* ✅
+## Phase 1 — Repository Setup _(deps: Phase 0)_ ✅
 
 - [x] Branch layout: `main` (default, = the brief's `master` — D-03), `pre-release` created now, `release/v1.0.0` created at tagging (Phase 15); work happens on `feature/*` ([traceability §5](docs/traceability.md))
 - [x] Root folder skeleton: `backend/`, `frontend/`, `docs/`, `todo.md` — npm workspaces, one `npm install`
@@ -36,36 +36,37 @@ Conventions: `<type>(<scope>): <description>` commits · every task = at least o
 
 **DoD met:** lint + typecheck pass in both packages; the API boots and answers the documented health/error contracts; no secrets or build output in git.
 
-## Phase 2 — Database *(deps: 1)*
+## Phase 2 — Database _(deps: 1)_ ✅
 
-- [ ] Prisma schema for all 10 tables per [database.md](docs/database.md) (types, enums, FKs, checks)
-- [ ] Partial unique indexes: one `ACTIVE` membership per request; one `OPEN` pool per vehicle+corridor
-- [ ] Migration `001_init` committed (`prisma migrate dev` → review SQL → commit)
-- [ ] Idempotent seed: zones, 28 distances, story cast, Bullet (capacity 3)
-- [ ] `CHECK (seats_taken <= seat_capacity)` verified by deliberately failing raw SQL (test in Phase 11)
+- [x] Prisma schema for all 10 tables per [database.md](docs/database.md) (types, enums, FKs, checks)
+- [x] Partial unique indexes: one `OPEN` pool per vehicle+corridor; unique active membership per request
+- [x] Migration `20260926193416_init` applied & committed with custom SQL constraints (corridor checks, capacity checks, positive distances, non-negative poisha amounts)
+- [x] Idempotent seed: zones, 28 distances, story cast, Bullet (capacity 3)
+- [x] `CHECK (seats_taken <= seat_capacity)` verified by deliberately failing raw SQL
+- [x] Database readiness probe (`ping()` via `SELECT 1`) integrated into `GET /api/v1/health/ready`
 
 **DoD:** `prisma migrate deploy` on empty DB creates everything; seed re-run twice changes nothing; ERD in docs matches actual schema.
 
-## Phase 3 — Authentication *(deps: 2)*
+## Phase 3 — Authentication _(deps: 2)_
 
-- [ ] `register` / `login` / `refresh` / `logout` / `me` per [api.md §2](docs/api.md)
-- [ ] bcrypt hashing, JWT issue/verify, refresh rotation, httpOnly cookie
-- [ ] `authenticate` + `authorize(role)` middleware, typed `req.user`
-- [ ] Unit + integration tests: auth happy path, duplicate email, bad credentials, refresh rotation, role gates
+- [x] `register` / `login` / `refresh` / `logout` / `me` per [api.md §2](docs/api.md)
+- [x] bcrypt hashing, JWT issue/verify, refresh rotation, httpOnly cookie
+- [x] `authenticate` + `authorize(role)` middleware, typed `req.user`
+- [x] Unit + integration tests: auth happy path, duplicate email, bad credentials, refresh rotation, role gates
 
 **DoD:** full auth integration suite green; no token/password leaks in responses or logs.
 
-## Phase 4 — Passenger Flow (API) *(deps: 3; wiring needs 6 + 7 — see build-order note)*
+## Phase 4 — Passenger Flow (API) _(deps: 3; wiring needs 6 + 7 — see build-order note)_
 
-- [ ] Zones module: `GET /zones` + seed-backed distance lookup ([api §3](docs/api.md))
-- [ ] `POST /rides` endpoint: Zod validation, ownership/idempotency (`clientRequestId`), calls matching (Phase 6) + estimate (Phase 7) → `201` with `poolId` + estimate
-- [ ] `GET /rides` (list/history, pagination, status filter) + `GET /rides/:id` (detail with timeline, fare, payment) — ownership-scoped → `404` for foreign ids
-- [ ] Ride detail payload assembly from `ride_status_history`
-- [ ] Integration tests: create/list/detail happy paths + validation errors + foreign-id `404`
+- [x] Zones module: `GET /zones` + seed-backed distance lookup ([api §3](docs/api.md))
+- [x] `POST /rides` endpoint: Zod validation, ownership/idempotency (`clientRequestId`), calls matching (Phase 6) + estimate (Phase 7) → `201` with `poolId` + estimate
+- [x] `GET /rides` (list/history, pagination, status filter) + `GET /rides/:id` (detail with timeline, fare, payment) — ownership-scoped → `404` for foreign ids
+- [x] Ride detail payload assembly from `ride_status_history`
+- [x] Integration tests: create/list/detail happy paths + validation errors + foreign-id `404`
 
-**DoD:** passenger endpoints match [api.md](docs/api.md) byte-for-byte in examples; authz tests (foreign ride → `404`) green.
+**DoD:** passenger endpoints match [api.md](docs/api.md) byte-for-byte in examples; authz tests (foreign ride → `404`) green. ✅ — `ride-create.test.ts` (23 tests) drives every documented path end-to-end: the demo request (Banani → Dhanmondi: `14400 → 2880 → 11520`), Rafiq joining Nusrat's pool (same `poolId`, 2/3 seats), a second corridor getting its own pool, `clientRequestId` replay (`200`, nothing written), the strict-body `400`s (`VALIDATION_ERROR` on an unknown key, `SAME_ZONE`, `ZONE_NOT_FOUND`), all three `409`s (`NO_VEHICLE_AVAILABLE` / `POOL_CAPACITY_EXCEEDED` / `ACTIVE_RIDE_EXISTS`), the 401/403 authz matrix, list pagination + `?status=` filtering, and detail assembly (pool summary, timeline, fare, payment). Suite **105/105**; live smoke against Docker Postgres reproduced the same payloads and ended with `seats_taken = Σ ACTIVE memberships = 2`. Design notes: `createRide` persists the fare estimate **and** the creation trail (`RIDE_REQUEST → REQUESTED`, plus `POOL → OPEN` when it created the pool) through matching's `persist` hook, so claim + ride + member + fare + history commit in one transaction (`MatchOutcome` gained `createdAt` for the response); an unknown `?status=` value is an honest empty page rather than a `400`; list rows carry fare + payment status (FR-HISTORY-001) via a single joined query.
 
-## Phase 5 — Driver Flow (API) *(deps: 3, 4)*
+## Phase 5 — Driver Flow (API) _(deps: 3, 4)_
 
 - [ ] Vehicles: `GET/POST /vehicles`, `PATCH /vehicles/:id` (online toggle, owner-only)
 - [ ] `GET /driver/pools` (status filter incl. `OPEN` queue + `COMPLETED` history) + `GET /driver/pools/:id` (roster + fares)
@@ -74,26 +75,26 @@ Conventions: `<type>(<scope>): <description>` commits · every task = at least o
 
 **DoD:** full trip progression drivable via API tests alone (no UI yet); every transition writes history rows.
 
-## Phase 6 — Pooling *(deps: 2, 4 endpoint shell)*
+## Phase 6 — Pooling _(deps: 2, 4 endpoint shell)_ — executed second per the build-order note (7 → 6 → 4 → 5 → 8)
 
-- [ ] `matching.service`: five join conditions ([PRD §11](docs/PRD.md)) → join existing or create new `OPEN` pool
-- [ ] Atomic seat claim (raw conditional `UPDATE` in `$transaction`) + `POOL_CAPACITY_EXCEEDED` on 0 rows
-- [ ] Unique-violation retry path (racing creators converge on one pool)
-- [ ] Partial unique indexes active in migration (verify by attempting violations in tests)
-- [ ] Tests: shared corridor → one pool; different corridor → two pools; full pool → `409`; duplicate active membership impossible
+- [x] `matching.service`: five join conditions ([PRD §11](docs/PRD.md)) → join existing or create new `OPEN` pool
+- [x] Atomic seat claim (raw conditional `UPDATE` in `$transaction`) + `POOL_CAPACITY_EXCEEDED` on 0 rows
+- [x] Unique-violation retry path (racing creators converge on one pool)
+- [x] Partial unique indexes active in migration (verify by attempting violations in tests)
+- [x] Tests: shared corridor → one pool; different corridor → two pools; full pool → `409`; duplicate active membership impossible
 
-**DoD:** `rideCreate.test` + `matching.test.ts` green; DB-level violations proven by direct SQL attempts.
+**DoD:** `rideCreate.test` + `matching.test.ts` green; DB-level violations proven by direct SQL attempts. ✅ (per build order) — `matching.test.ts` (23 tests: pure decision table, pool formation, racing-creator retry, claim-race rollback, membership/idempotency guards, static migration assertions) + `capacity.test.ts` (5 boundary tests) green; suite **82/82**. _Carry-over:_ `rideCreate.test` landed with Phase 4's endpoint shell (`tests/ride-create.test.ts` — pool formation through the real HTTP stack; suite 105/105 after Phase 4), while the direct-SQL violation attempts await Phase 9 (the CHECK half is already Phase 9's bullet; Postgres is up locally). Design note: the unique-violation retry restarts the whole transaction — a failed INSERT aborts a Postgres transaction, so the catch lives outside `$transaction` (architecture §6 step 4, PG-correct reading).
 
-## Phase 7 — Fare *(deps: 2, 6)*
+## Phase 7 — Fare _(deps: 2, 6)_ — executed first per the build-order note (7 → 6 → 4 → 5 → 8)
 
-- [ ] `config/rate-card.ts` constants (6000 / 1200 / 20 / 5000) + pure `fare.service` (estimate + finalize)
-- [ ] `POST /fare/estimate` endpoint
-- [ ] `fares` row lifecycle: `ESTIMATED` at create → `FINAL` at pool completion (discount iff ≥ 2 active completers; `perSeat × seats`)
-- [ ] Unit tests: the worked example (`14400 → 2880 → 11520`), solo = no discount, floor rounding, min-fare guard, seats multiplier
+- [x] `config/rate-card.ts` constants (6000 / 1200 / 20 / 5000 — landed in Phase 1) + pure `fare.service` (estimate + finalize, integer-poisha floor maths)
+- [x] `POST /fare/estimate` endpoint (authenticated PASSENGER, strict body — clients can never submit amounts, `seatCapacity` + `poolAvailableSeats` per D-07)
+- [ ] `fares` row lifecycle: `ESTIMATED` at create → `FINAL` at pool completion (discount iff ≥ 2 active completers; `perSeat × seats`) — _`saveEstimate` is wired into `POST /rides` (Phase 4 ✅, inside the matching transaction); `finalizeRideFare` closes with Phase 5's pool completion, at which point this box closes_
+- [x] Unit tests: the worked example (`14400 → 2880 → 11520`), solo = no discount, floor rounding, min-fare guard, seats multiplier
 
-**DoD:** `fare.test.ts` proves hand-calculated demo values byte-for-byte; no float in the money path (grep-verified).
+**DoD:** `fare.test.ts` proves hand-calculated demo values byte-for-byte; no float in the money path (grep-verified). ✅ — suite 54/54 green; grep finds no float API and no decimal values in executable fare code (only taka figures inside comments, mirroring PRD §12.3).
 
-## Phase 8 — Cancellation *(deps: 4, 5, 6, 7)*
+## Phase 8 — Cancellation _(deps: 4, 5, 6, 7)_
 
 - [ ] `POST /rides/:id/cancel`: pre-start only, frees seats atomically, membership → `CANCELLED`, empty pool → `CANCELLED`
 - [ ] Driver pool cancel (pre-start) cascading to active members
@@ -102,7 +103,7 @@ Conventions: `<type>(<scope>): <description>` commits · every task = at least o
 
 **DoD:** invariant `seats_taken = Σ ACTIVE memberships` holds after every test scenario (asserted directly in SQL).
 
-## Phase 9 — Concurrency *(deps: 6, 8)*
+## Phase 9 — Concurrency _(deps: 6, 8)_
 
 - [ ] `lastSeat.race.test.ts` exactly as [testing §6](docs/testing.md) (1 seat free → Nusrat vs Shirin → one `201`, one `409`)
 - [ ] 100-iteration loop with reseed; zero tolerance for flakes
@@ -111,7 +112,7 @@ Conventions: `<type>(<scope>): <description>` commits · every task = at least o
 
 **DoD:** 100/100 race runs pass; overbooking impossible by both application and constraint layers; evidence recorded for demo video.
 
-## Phase 10 — Frontend Integration *(deps: 4–9 API complete)*
+## Phase 10 — Frontend Integration _(deps: 4–9 API complete)_
 
 - [ ] Auth screens: `/login`, `/register` (role selector), token-in-memory client with silent refresh, logout, `?next=` redirect
 - [ ] Passenger screens per [ui-ux §2](docs/ui-ux.md): dashboard, request-ride (ZonePicker, SeatStepper, live FareCard), rides list, ride detail (StatusTimeline + pay button + cancel)
@@ -123,7 +124,7 @@ Conventions: `<type>(<scope>): <description>` commits · every task = at least o
 
 **DoD:** both journeys completable by a human on a clean seed, keyboard-only, at 375 px and 1280 px; zero raw status codes or stack traces ever rendered.
 
-## Phase 11 — Testing *(deps: 10; extends tests written incrementally in 3–9)*
+## Phase 11 — Testing _(deps: 10; extends tests written incrementally in 3–9)_
 
 - [ ] Gap review: walk [traceability](docs/traceability.md) matrix row → named test; add any missing
 - [ ] Playwright E2E: `passenger-journey.spec.ts`, `driver-journey.spec.ts`, negative slice (testing §7)
@@ -133,7 +134,7 @@ Conventions: `<type>(<scope>): <description>` commits · every task = at least o
 
 **DoD:** CI green on a PR; every P0 row in the matrix has a test name; no flaky tests.
 
-## Phase 12 — Docker *(deps: 4–10 stable)*
+## Phase 12 — Docker _(deps: 4–10 stable)_
 
 - [ ] `backend/Dockerfile` multi-stage (deps → build → `node:22-alpine`), `frontend/Dockerfile` (Next standalone)
 - [ ] `docker-compose.yml`: `db` (volume + `pg_isready`), `api` (depends_on healthy → migrate → seed → start, healthcheck `/api/v1/health`), `web` (healthcheck `/`)
@@ -143,7 +144,7 @@ Conventions: `<type>(<scope>): <description>` commits · every task = at least o
 
 **DoD:** a stranger with Docker reaches a working demo in < 15 min (Goal G1) using only the README.
 
-## Phase 13 — Deployment *(deps: 12)*
+## Phase 13 — Deployment _(deps: 12)_
 
 - [ ] Neon free DB → `DATABASE_URL`; Render web service (Docker) env vars + `/api/v1/health` check; Vercel frontend env
 - [ ] Production seed behavior verified (reference data only)
@@ -153,15 +154,15 @@ Conventions: `<type>(<scope>): <description>` commits · every task = at least o
 
 **DoD:** live URLs healthy; demo scenario passes against production; every free-tier claim re-verified on deployment day (deployment §2).
 
-## Phase 14 — README *(deps: 13)*
+## Phase 14 — README _(deps: 13)_
 
 - [ ] Sections: what/why, cast & demo, architecture diagram, **quickstart (`docker compose up`)**, env vars, migrations/seed, API summary (link `docs/api.md`), testing commands, deployment URLs, screenshots, branch/commit conventions
-- [ ] **AI Usage section** (brief requirement): AI tools used · what they were used for · **one accepted suggestion** · **one rejected/modified suggestion** · why it was changed — filled with *actual* project history only
+- [ ] **AI Usage section** (brief requirement): AI tools used · what they were used for · **one accepted suggestion** · **one rejected/modified suggestion** · why it was changed — filled with _actual_ project history only
 - [ ] Link demo video (Phase 16) + docs/ index
 
 **DoD:** README alone lets an evaluator run, test, and understand the project; AI section complete and truthful.
 
-## Phase 15 — Git Release Process *(deps: 11–14)*
+## Phase 15 — Git Release Process _(deps: 11–14)_
 
 - [ ] Confirm branch model: `feature/*` → `main` → `pre-release` → `release/v1.0.0` (+ tag `v1.0.0`); close **D-03** (`main` vs `master` naming)
 - [ ] Audit commit messages against `<type>(<scope>): <description>` (feat/fix/refactor/test/docs/chore/build)
@@ -170,7 +171,7 @@ Conventions: `<type>(<scope>): <description>` commits · every task = at least o
 
 **DoD:** tagged `release/v1.0.0` exists; history readable; conventions documented in README.
 
-## Phase 16 — Demo Video *(deps: 15; content from PRD §16)*
+## Phase 16 — Demo Video _(deps: 15; content from PRD §16)_
 
 - [ ] Record steps 1–10 of [PRD §16](docs/PRD.md) (~3 min), including fare values on screen (`৳115.20` × 2)
 - [ ] Append concurrency proof (test run or dual-curl race showing `201` + `409`)
@@ -188,5 +189,3 @@ Conventions: `<type>(<scope>): <description>` commits · every task = at least o
 - [ ] Full test suite green in CI; concurrency 100/100
 - [ ] README + AI usage + video + docs/ present; deployment URLs live
 - [ ] No secrets in git; `.gitignore` airtight; forbidden tech absent from package manifests
-
-
