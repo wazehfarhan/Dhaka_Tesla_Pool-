@@ -11,6 +11,15 @@
 # passengers on one pool, the PENDING → PAID payment, and the one-seat race.
 # No mocks and no jq: each check greps the response body, and a mismatch exits
 # non-zero with the body printed.
+#
+# Expect ~4 minutes, not seconds: the script registers nine users and the auth
+# limiter allows 10 requests/minute/IP (security.md §5), so it pauses and says
+# so rather than failing. That is the documented production limit being
+# reproduced faithfully — raise RATE_LIMIT_MAX_AUTH to skip the pause.
+#
+# It also assumes a *fresh* database: leftover demo rows from an earlier run
+# would fill the demo corridor, and the script says so and exits rather than
+# reporting a confusing 409. Reset with `docker compose down -v`.
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
