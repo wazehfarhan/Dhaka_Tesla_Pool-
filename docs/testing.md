@@ -33,7 +33,7 @@ Integration tests need an isolated database (`dhaka_tesla_pool_test`) recreated 
 | `fare.test.ts` | FR-FARE-001…003 | Banani→Dhanmondi 7 km: subtotal `14400`, discount `2880`, per-seat `11520` (the demo numbers — exact equality, integer math); discount = 0 when pool completes solo; floor rounding (`14400*15%` = `2160` exact, plus an odd-number case); seats multiplier (`perSeat × 3`); min-fare guard never triggers under current rate card |
 | `matching.test.ts` | FR-POOL-002/003 | same corridor + OPEN + seats → match; different destination → no match; full pool → no match; no OPEN pool → create; OPEN pool exists but full → `POOL_CAPACITY_EXCEEDED` |
 | `capacity.test.ts` | FR-POOL-004 | `seatsTaken + n <= capacity` boundary: 3/3 rejects 1 seat; 2/3 accepts 1 but rejects 2 |
-| `stateMachine.test.ts` | FR-RIDE-001 | legal chain `REQUESTED→ACCEPTED→DRIVER_ARRIVED→STARTED→COMPLETED`; every illegal jump rejected (`COMPLETE` from `REQUESTED`, `START` from `ACCEPTED`, anything after `COMPLETED`); `CANCELLED` reachable only pre-`STARTED` |
+| `stateMachine.test.ts` | FR-RIDE-001, FR-DRIVER-003 | the driver progression table (`OPEN→ACCEPTED→DRIVER_ARRIVED→STARTED→COMPLETED`): the legal chain walks end-to-end; every illegal jump is refused with `expected` = the status that action needs; nothing is legal after `COMPLETED`; `CANCELLED` is unreachable by a driver action (Phase 8 owns cancelling) |
 | `cancellation.test.ts` | FR-PASSENGER-005 | last member cancels → pool `CANCELLED`; middle member cancels → seats freed, others unaffected; after `STARTED` → `RIDE_ALREADY_STARTED` |
 
 ## 4. Integration tests (Supertest + real DB)
@@ -48,6 +48,10 @@ Integration tests need an isolated database (`dhaka_tesla_pool_test`) recreated 
 | `payment.test` | completed trip | payment `PENDING` → simulate → `PAID`, `method=SIMULATED`; repeat → still `PAID`, one row only |
 | `cancel.test` | 2-member pool | Shirin cancels → her request/member `CANCELLED`, seats 1/2; Nusrat's ride untouched |
 | `lifecycle.test` | full happy path | driver arrives → starts → completes: pool + all active members end `COMPLETED`, status history has every transition |
+| `driverFlow.test` | 2-member `OPEN` pool (two `POST /rides` on the demo corridor) | driver queue/detail: roster with `ESTIMATED` fares and `null` payments, corridor names, `distanceKm`, pagination meta, `?status=` filters, own-scope only; `accept` → pool **and** every member `ACCEPTED` + history rows; re-accept and any out-of-order action → `409 ILLEGAL_STATE_TRANSITION` with `details {current, expected}`; foreign/unknown pool → `404`; `complete` → `FINAL` `11520` + `PENDING` payment per member in one transaction, the passenger's own `GET /rides/:id` agrees, `?status=COMPLETED` is the driver's history; a cancelled member stays `CANCELLED`, undiscounted (`14400`) for the lone completer and unpaid |
+| `vehicles.test` | driver garage (`GET`/`POST`/`PATCH`) | own vehicles only, oldest first; `201` starts `OFFLINE`; duplicate plate → `409 CONFLICT` (fleet-wide UNIQUE); capacity outside 1…8 / unknown key → `400`; toggle answers `{id, status}`; foreign/unknown id → `404`, malformed id or status → `400`; `ONLINE` is what lets a new ride request match (`NO_VEHICLE_AVAILABLE` otherwise) and that pool appears in the owner's queue |
+
+Driver-side `poolAccept.test` / `lifecycle.test` / `farePersist.test` cases are delivered by `driver-flow.test.ts` (same scenarios, one file). Its fixture seeds users with the real token service instead of `POST /auth/login`: bcrypt at cost 12 (security.md §1) costs ~430 ms per call, which would otherwise dominate the suite — the credential exchange itself stays `auth.test.ts`'s subject.
 
 ## 5. Authorization tests (explicit matrix)
 

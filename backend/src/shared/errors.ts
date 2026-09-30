@@ -109,8 +109,9 @@ export class ConflictError extends AppError {
   constructor(
     code: ErrorCode = 'CONFLICT',
     message = 'The request conflicts with the current state.',
+    details?: unknown,
   ) {
-    super(code, message);
+    super(code, message, details);
   }
 }
 

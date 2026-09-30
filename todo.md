@@ -68,12 +68,12 @@ Conventions: `<type>(<scope>): <description>` commits · every task = at least o
 
 ## Phase 5 — Driver Flow (API) _(deps: 3, 4)_
 
-- [ ] Vehicles: `GET/POST /vehicles`, `PATCH /vehicles/:id` (online toggle, owner-only)
-- [ ] `GET /driver/pools` (status filter incl. `OPEN` queue + `COMPLETED` history) + `GET /driver/pools/:id` (roster + fares)
-- [ ] `POST /driver/pools/:id/accept|arrive|start|complete` — conditional transitions + cascade to active members + status history, one transaction each
-- [ ] Integration tests: progression happy path, out-of-order `409`s, passenger → `403`, foreign pool → `404`
+- [x] Vehicles: `GET/POST /vehicles`, `PATCH /vehicles/:id` (online toggle, owner-only)
+- [x] `GET /driver/pools` (status filter incl. `OPEN` queue + `COMPLETED` history) + `GET /driver/pools/:id` (roster + fares)
+- [x] `POST /driver/pools/:id/accept|arrive|start|complete` — conditional transitions + cascade to active members + status history, one transaction each
+- [x] Integration tests: progression happy path, out-of-order `409`s, passenger → `403`, foreign pool → `404`
 
-**DoD:** full trip progression drivable via API tests alone (no UI yet); every transition writes history rows.
+**DoD:** full trip progression drivable via API tests alone (no UI yet); every transition writes history rows. ✅ — `state-machine.test.ts` (7 pure tests over the transition table), `driver-flow.test.ts` (14 HTTP tests: queue/detail, `accept`/`arrive`/`start`/`complete`, the `409 ILLEGAL_STATE_TRANSITION` envelope with `{current, expected}`, foreign/unknown → `404`, the 401/403 matrix) and `vehicles.test.ts` (8 tests, including the documented effect that `ONLINE` gates new ride requests); suite **134/134**. Design notes: `driver.transitions.ts` is a pure `DRIVER_TRANSITIONS` table + `decideTransition()` — the service only _applies_ it; each transition is one `$transaction`: ownership lookup → status-gated `updateMany` (`count === 0` → re-read → `409` `{current, expected}`) → cascade the new status onto every non-`CANCELLED` ride → append the `POOL` row plus one `RIDE_REQUEST` row per cascaded ride (`DRIVER_ACCEPTED` / `DRIVER_ARRIVED` / `TRIP_STARTED` / `TRIP_COMPLETED`) → on `complete`, `finalizeRideFare(rideId, completers, tx)` (now transaction-aware through an optional client; FR-FARE-004 stays write-once) and one `payment.create({status:'PENDING'})` per active member. A member who cancelled keeps `CANCELLED` (the cascade skips it), is excluded from the `≥ 2` completer discount rule and gets no payment. Foreign/unknown pool and vehicle ids are `404`, never `403` (api.md §1 — no ID probing). Still open: `POST /driver/pools/:id/cancel` (api.md §6.5), the payments endpoints (api.md §8) and the cancellation clause of `stateMachine.test.ts` — all Phase 8.
 
 ## Phase 6 — Pooling _(deps: 2, 4 endpoint shell)_ — executed second per the build-order note (7 → 6 → 4 → 5 → 8)
 
@@ -89,7 +89,7 @@ Conventions: `<type>(<scope>): <description>` commits · every task = at least o
 
 - [x] `config/rate-card.ts` constants (6000 / 1200 / 20 / 5000 — landed in Phase 1) + pure `fare.service` (estimate + finalize, integer-poisha floor maths)
 - [x] `POST /fare/estimate` endpoint (authenticated PASSENGER, strict body — clients can never submit amounts, `seatCapacity` + `poolAvailableSeats` per D-07)
-- [ ] `fares` row lifecycle: `ESTIMATED` at create → `FINAL` at pool completion (discount iff ≥ 2 active completers; `perSeat × seats`) — _`saveEstimate` is wired into `POST /rides` (Phase 4 ✅, inside the matching transaction); `finalizeRideFare` closes with Phase 5's pool completion, at which point this box closes_
+- [x] `fares` row lifecycle: `ESTIMATED` at create → `FINAL` at pool completion (discount iff ≥ 2 active completers; `perSeat × seats`) — _`saveEstimate` is wired into `POST /rides` (Phase 4 ✅, inside the matching transaction); closed by Phase 5's completion transaction (`driver.service.transition('complete')` → `finalizeRideFare(rideId, completers, tx)` + the `PENDING` payment row), proven by `driver-flow.test.ts` — `FINAL` `11520` with the `2880` discount for two completers, `14400` undiscounted for a lone one_
 - [x] Unit tests: the worked example (`14400 → 2880 → 11520`), solo = no discount, floor rounding, min-fare guard, seats multiplier
 
 **DoD:** `fare.test.ts` proves hand-calculated demo values byte-for-byte; no float in the money path (grep-verified). ✅ — suite 54/54 green; grep finds no float API and no decimal values in executable fare code (only taka figures inside comments, mirroring PRD §12.3).

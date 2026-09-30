@@ -360,5 +360,10 @@ describe('PATCH /api/v1/vehicles/:id — the toggle\u2019s documented effect (ap
     const online = await askForRide();
     expect(online.status).toBe(201);
     expect(online.body.data.status).toBe('REQUESTED');
+
+    // The car's owner is the pool's driver, so the request lands in Jashim's queue.
+    const queue = await request(app).get('/api/v1/driver/pools').set(auth(jashim.token));
+    expect(queue.body.meta.total).toBe(1);
+    expect(queue.body.data[0].id).toBe(online.body.data.poolId);
   });
 });

@@ -10,6 +10,7 @@ import { createErrorHandler, createNotFoundHandler } from './middleware/error-ha
 import { createRateLimiters } from './middleware/rate-limit.js';
 import { createAuthRouter } from './modules/auth/auth.routes.js';
 import { createTokenService } from './modules/auth/token.service.js';
+import { createDriverRouter } from './modules/driver/driver.routes.js';
 import { createFareRouter } from './modules/fare/fare.routes.js';
 import { createHealthRouter } from './modules/health/health.routes.js';
 import { createRidesRouter } from './modules/rides/rides.routes.js';
@@ -71,6 +72,7 @@ export function createApp({ env, logger, database }: AppDependencies): Express {
   app.use('/api/v1', createZonesRouter({ database }));
   app.use('/api/v1', createRidesRouter({ database, authenticate, authorize }));
   app.use('/api/v1', createVehiclesRouter({ database, authenticate, authorize }));
+  app.use('/api/v1', createDriverRouter({ database, authenticate, authorize }));
 
   // Order matters: these two are always last.
   app.use(createNotFoundHandler());

@@ -125,7 +125,11 @@ export interface FareService {
     tx?: FarePersistenceClient,
   ): Promise<FareBreakdown>;
   /** Write the `FINAL` fare once — called from the pool-completion transaction (Phase 5). */
-  finalizeRideFare(rideRequestId: string, activeCompleters: number): Promise<FareBreakdown>;
+  finalizeRideFare(
+    rideRequestId: string,
+    activeCompleters: number,
+    tx?: FarePersistenceClient,
+  ): Promise<FareBreakdown>;
 }
 
 export function createFareService({ database }: { database?: Database }): FareService {
@@ -214,11 +218,18 @@ export function createFareService({ database }: { database?: Database }): FareSe
       return fare;
     },
 
+    /**
+     * FR-FARE-002 finalization — `tx?` lets pool completion run it inside the
+     * driver's transition transaction (api.md §6.4: fares finalize and payments
+     * are created atomically with the status flip). Outside a transaction the
+     * root client is used, exactly as before.
+     */
     async finalizeRideFare(
       rideRequestId: string,
       activeCompleters: number,
+      tx?: FarePersistenceClient,
     ): Promise<FareBreakdown> {
-      const fares = createFareRepository(prisma());
+      const fares = createFareRepository(tx ?? prisma());
       const row = await fares.findFareByRideRequestId(rideRequestId);
       if (!row) throw new NotFoundError('Fare not found for this ride.');
       const ride = await fares.findRideRequest(rideRequestId);
