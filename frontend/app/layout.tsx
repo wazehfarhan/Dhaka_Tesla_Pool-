@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import { AppHeader } from '@/components/app-header';
+import { AuthProvider } from '@/components/auth-provider';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -8,17 +10,19 @@ export const metadata: Metadata = {
     'Ride-pooling MVP for Dhaka — passengers share one Tesla, each keeping their own seat, status and fare.',
 };
 
+/**
+ * The shell every screen renders inside (ui-ux §8): `header` + `nav` landmarks,
+ * then `main`. `AuthProvider` is mounted here — once, above the router — because
+ * the session outlives any single page; the header is its first consumer.
+ */
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en">
       <body className="min-h-screen">
-        <header className="border-b border-slate-200 bg-white">
-          <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
-            <span className="font-semibold">Dhaka Tesla Pool</span>
-            <span className="text-xs text-slate-500">Phase 1 scaffold</span>
-          </div>
-        </header>
-        <main className="mx-auto max-w-3xl px-4 py-8">{children}</main>
+        <AuthProvider>
+          <AppHeader />
+          <main className="mx-auto max-w-5xl px-4 py-8">{children}</main>
+        </AuthProvider>
       </body>
     </html>
   );
