@@ -10,6 +10,7 @@ import { createErrorHandler, createNotFoundHandler } from './middleware/error-ha
 import { createRateLimiters } from './middleware/rate-limit.js';
 import { createAuthRouter } from './modules/auth/auth.routes.js';
 import { createTokenService } from './modules/auth/token.service.js';
+import { createFareRouter } from './modules/fare/fare.routes.js';
 import { createHealthRouter } from './modules/health/health.routes.js';
 import type { AppLogger } from './shared/logger.js';
 
@@ -59,10 +60,11 @@ export function createApp({ env, logger, database }: AppDependencies): Express {
   app.use(express.json({ limit: '100kb' }));
 
   const tokens = createTokenService(env);
-  const { authenticate } = createAuthMiddleware(tokens);
+  const { authenticate, authorize } = createAuthMiddleware(tokens);
 
   app.use('/api/v1', createHealthRouter(database));
   app.use('/api/v1', createAuthRouter({ database, env, tokens, authenticate }));
+  app.use('/api/v1', createFareRouter({ database, authenticate, authorize }));
 
   // Order matters: these two are always last.
   app.use(createNotFoundHandler());
