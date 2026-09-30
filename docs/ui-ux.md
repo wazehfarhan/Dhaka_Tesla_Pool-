@@ -8,19 +8,19 @@ Clean, simple, responsive, accessible, easy to demo — nothing more. The UI is 
 
 ## 2. Pages
 
-| Route | Role | Purpose |
-|---|---|---|
-| `/` | any | Redirect: passenger → `/passenger`, driver → `/driver`, guest → `/login` |
-| `/login` | guest | Email + password |
-| `/register` | guest | Name, email, password, role selector (Passenger/Driver) |
-| `/passenger` | passenger | Dashboard: active ride card or empty state + "Request ride" CTA |
-| `/passenger/request-ride` | passenger | Pickup → destination → seats → live fare estimate → submit |
-| `/passenger/rides` | passenger | Ride history (paginated, status filter) |
-| `/passenger/rides/:id` | passenger | Ride detail: status timeline, pool members, fare breakdown, pay button |
-| `/driver` | driver | Dashboard: online/offline toggle, current trip card, next action button |
-| `/driver/requests` | driver | Queue of `OPEN` pools waiting for acceptance (corridor, seats taken, estimate) |
-| `/driver/pools/:id` | driver | Pool detail: passenger list, per-passenger fare, action buttons (Accept → Arrive → Start → Complete) |
-| `/driver/history` | driver | Completed/cancelled pools with totals |
+| Route                     | Role      | Purpose                                                                                              |
+| ------------------------- | --------- | ---------------------------------------------------------------------------------------------------- |
+| `/`                       | any       | Redirect: passenger → `/passenger`, driver → `/driver`, guest → `/login`                             |
+| `/login`                  | guest     | Email + password                                                                                     |
+| `/register`               | guest     | Name, email, password, role selector (Passenger/Driver)                                              |
+| `/passenger`              | passenger | Dashboard: active ride card or empty state + "Request ride" CTA                                      |
+| `/passenger/request-ride` | passenger | Pickup → destination → seats → live fare estimate → submit                                           |
+| `/passenger/rides`        | passenger | Ride history (paginated, status filter)                                                              |
+| `/passenger/rides/:id`    | passenger | Ride detail: status timeline, pool members, fare breakdown, pay button                               |
+| `/driver`                 | driver    | Dashboard: online/offline toggle, current trip card, next action button                              |
+| `/driver/requests`        | driver    | Queue of `OPEN` pools waiting for acceptance (corridor, seats taken, estimate)                       |
+| `/driver/pools/:id`       | driver    | Pool detail: passenger list, per-passenger fare, action buttons (Accept → Arrive → Start → Complete) |
+| `/driver/history`         | driver    | Completed/cancelled pools with totals                                                                |
 
 Middleware (Next.js) enforces role access: a passenger hitting `/driver/*` is redirected to `/passenger` **and** the API independently enforces `403` — the UI check is convenience, not security ([security.md](security.md) §4).
 
@@ -71,15 +71,15 @@ Buttons are **state-derived, not role-derived**: the UI renders `Accept` only wh
 
 ## 5. UI states (every screen defines all seven)
 
-| State | Rule |
-|---|---|
-| **Loading** | Skeleton blocks (no spinners-in-empty-pages); buttons show `…` and disable while their mutation is in flight (double-click prevention) |
-| **Empty** | Dashboard: "No active ride — Request one" CTA / driver: "No open pools right now" — never a blank screen |
-| **Success** | Toast/inline confirmation ("Ride requested — seats held"), status timeline updates on next poll |
-| **Error** | Inline, human copy mapped from API codes: `POOL_CAPACITY_EXCEEDED` → *"No seats left on this route — Bullet is full."*; `NO_VEHICLE_AVAILABLE` → *"The Tesla is offline right now."*; `ILLEGAL_STATE_TRANSITION` → *"This trip already moved on — refreshing…"* (+ auto refetch) |
-| **Disabled** | Cancel hidden/disabled from `STARTED`; driver action buttons hidden unless the state matches; seat stepper capped at remaining capacity |
-| **Unauthorized** | Expired access token → silent refresh → retry; refresh fails → redirect to `/login` preserving `?next=`; wrong role on a route → redirect to own dashboard; API `403/404` never rendered as a raw status code |
-| **No seats** | when `poolAvailableSeats = 0` the seat picker disables submit and shows the dedicated "Bullet is full on this route — try another route" panel; a `409 POOL_CAPACITY_EXCEEDED` that slips through a race renders the same panel (never a generic error) |
+| State            | Rule                                                                                                                                                                                                                                                                             |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Loading**      | Skeleton blocks (no spinners-in-empty-pages); buttons show `…` and disable while their mutation is in flight (double-click prevention)                                                                                                                                           |
+| **Empty**        | Dashboard: "No active ride — Request one" CTA / driver: "No open pools right now" — never a blank screen                                                                                                                                                                         |
+| **Success**      | Toast/inline confirmation ("Ride requested — seats held"), status timeline updates on next poll                                                                                                                                                                                  |
+| **Error**        | Inline, human copy mapped from API codes: `POOL_CAPACITY_EXCEEDED` → _"No seats left on this route — Bullet is full."_; `NO_VEHICLE_AVAILABLE` → _"The Tesla is offline right now."_; `ILLEGAL_STATE_TRANSITION` → _"This trip already moved on — refreshing…"_ (+ auto refetch) |
+| **Disabled**     | Cancel hidden/disabled from `STARTED`; driver action buttons hidden unless the state matches; seat stepper capped at remaining capacity                                                                                                                                          |
+| **Unauthorized** | Expired access token → silent refresh → retry; refresh fails → redirect to `/login` preserving `?next=`; wrong role on a route → redirect to own dashboard; API `403/404` never rendered as a raw status code                                                                    |
+| **No seats**     | when `poolAvailableSeats = 0` the seat picker disables submit and shows the dedicated "Bullet is full on this route — try another route" panel; a `409 POOL_CAPACITY_EXCEEDED` that slips through a race renders the same panel (never a generic error)                          |
 
 ## 6. Key components
 

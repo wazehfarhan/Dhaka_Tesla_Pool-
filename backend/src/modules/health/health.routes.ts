@@ -47,4 +47,3 @@ export function createHealthRouter(database?: Database): Router {
 
   return router;
 }
-

@@ -31,4 +31,3 @@ export function createDatabase(databaseUrl: string): Database {
     },
   };
 }
-

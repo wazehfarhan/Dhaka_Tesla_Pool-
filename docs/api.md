@@ -27,18 +27,18 @@ Companion documents: [requirements](requirements.md) · [architecture](architect
 
 - **Pagination:** query `?page=1&limit=20` (`limit` max 100). List responses are enveloped: `{"data":[…],"meta":{"page":1,"limit":20,"total":25}}`.
 - **Ownership:** every `:id` resource is resolved **within the caller's scope** (own rides / own driver pools). A resource that exists but isn't the caller's returns **`404 NOT_FOUND`**, never `403`, to avoid ID probing (see [security.md](security.md) §4). Genuine role mismatches (passenger hitting `/driver/*`) return `403`.
-- **Idempotency:** `POST /rides` accepts optional `clientRequestId` (UUID, header or body) unique per passenger — retries return the original ride (`200` instead of a second `201`). `POST …/payment/simulate` is naturally idempotent (repeat returns `PAID`). State transitions are *not* idempotent-friendly: repeating `accept` on an `ACCEPTED` pool returns `409 ILLEGAL_STATE_TRANSITION` so clients can detect ordering bugs.
+- **Idempotency:** `POST /rides` accepts optional `clientRequestId` (UUID, header or body) unique per passenger — retries return the original ride (`200` instead of a second `201`). `POST …/payment/simulate` is naturally idempotent (repeat returns `PAID`). State transitions are _not_ idempotent-friendly: repeating `accept` on an `ACCEPTED` pool returns `409 ILLEGAL_STATE_TRANSITION` so clients can detect ordering bugs.
 
 ## 2. Authentication — 🔓 public unless noted
 
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| POST | `/auth/register` | 🔓 | Create account |
-| POST | `/auth/login` | 🔓 | Get access token + refresh cookie |
-| POST | `/auth/refresh` | 🔓 (cookie) | Rotate access token |
-| POST | `/auth/refresh` | 🔓 (cookie) | Rotate access token |
-| POST | `/auth/logout` | 🔓 (cookie) | Clear refresh token |
-| GET | `/auth/me` | Bearer | Current profile |
+| Method | Path             | Auth        | Description                       |
+| ------ | ---------------- | ----------- | --------------------------------- |
+| POST   | `/auth/register` | 🔓          | Create account                    |
+| POST   | `/auth/login`    | 🔓          | Get access token + refresh cookie |
+| POST   | `/auth/refresh`  | 🔓 (cookie) | Rotate access token               |
+| POST   | `/auth/refresh`  | 🔓 (cookie) | Rotate access token               |
+| POST   | `/auth/logout`   | 🔓 (cookie) | Clear refresh token               |
+| GET    | `/auth/me`       | Bearer      | Current profile                   |
 
 **POST /api/v1/auth/register**
 
@@ -48,23 +48,24 @@ Companion documents: [requirements](requirements.md) · [architecture](architect
 // 201 response
 { "success": true, "data": { "id": "u_…", "name": "Nusrat", "email": "nusrat@example.com", "role": "PASSENGER" } }
 ```
+
 Errors: `400 VALIDATION_ERROR`, `409 EMAIL_TAKEN`.
 
 **POST /api/v1/auth/login** → `200` with `{data:{user:{…}, accessToken:"<jwt>"}}` + `Set-Cookie: refresh=…; HttpOnly; SameSite=Lax; Path=/api/v1/auth`. Errors: `401 INVALID_CREDENTIALS` (identical for unknown email and wrong password).
 
 ## 3. Zones — 🔓 public (dropdown data)
 
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/zones` | 🔓 | List the 8 Dhaka zones |
+| Method | Path     | Auth | Description            |
+| ------ | -------- | ---- | ---------------------- |
+| GET    | `/zones` | 🔓   | List the 8 Dhaka zones |
 
 `200` → `{"data":[{"id":1,"name":"Banani"},…]}`
 
 ## 4. Fare — 🔓 authenticated
 
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| POST | `/fare/estimate` | Bearer | Pre-request fare estimate |
+| Method | Path             | Auth   | Description               |
+| ------ | ---------------- | ------ | ------------------------- |
+| POST   | `/fare/estimate` | Bearer | Pre-request fare estimate |
 
 ```json
 // request
@@ -152,16 +153,29 @@ Same shape; guards: `ACCEPTED → DRIVER_ARRIVED`, `DRIVER_ARRIVED → STARTED`,
 
 ```json
 // 200 response of POST /driver/pools/p_…/complete
-{ "success": true, "data": {
-    "id": "p_…", "status": "COMPLETED",
+{
+  "success": true,
+  "data": {
+    "id": "p_…",
+    "status": "COMPLETED",
     "members": [
-      { "rideId": "r_nusrat", "passenger": "Nusrat", "status": "COMPLETED",
+      {
+        "rideId": "r_nusrat",
+        "passenger": "Nusrat",
+        "status": "COMPLETED",
         "fare": { "subtotalPoisha": 14400, "poolDiscountPoisha": 2880, "totalPoisha": 11520 },
-        "payment": { "status": "PENDING", "amountPoisha": 11520 } },
-      { "rideId": "r_rafiq", "passenger": "Rafiq", "status": "COMPLETED",
+        "payment": { "status": "PENDING", "amountPoisha": 11520 }
+      },
+      {
+        "rideId": "r_rafiq",
+        "passenger": "Rafiq",
+        "status": "COMPLETED",
         "fare": { "subtotalPoisha": 14400, "poolDiscountPoisha": 2880, "totalPoisha": 11520 },
-        "payment": { "status": "PENDING", "amountPoisha": 11520 } }
-    ] } }
+        "payment": { "status": "PENDING", "amountPoisha": 11520 }
+      }
+    ]
+  }
+}
 ```
 
 ### 6.5 POST /api/v1/driver/pools/:id/cancel (pre-start only)
@@ -182,42 +196,53 @@ Errors: `404` (not the caller's vehicle), `400 VALIDATION_ERROR`. Effect: `ONLIN
 
 ## 8. Payments
 
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/rides/:id/payment` | Bearer (owner) | Current payment (or `404` if ride not completed yet) |
-| POST | `/rides/:id/payment/simulate` | Bearer (owner) | `PENDING → PAID` (idempotent) |
+| Method | Path                          | Auth           | Description                                          |
+| ------ | ----------------------------- | -------------- | ---------------------------------------------------- |
+| GET    | `/rides/:id/payment`          | Bearer (owner) | Current payment (or `404` if ride not completed yet) |
+| POST   | `/rides/:id/payment/simulate` | Bearer (owner) | `PENDING → PAID` (idempotent)                        |
 
 ```json
 // 200 response (both first and repeated call)
-{ "success": true, "data": { "id": "pay_…", "rideId": "r_…", "amountPoisha": 11520,
-  "currency": "BDT", "status": "PAID", "method": "SIMULATED", "paidAt": "…" } }
+{
+  "success": true,
+  "data": {
+    "id": "pay_…",
+    "rideId": "r_…",
+    "amountPoisha": 11520,
+    "currency": "BDT",
+    "status": "PAID",
+    "method": "SIMULATED",
+    "paidAt": "…"
+  }
+}
 ```
+
 Errors: `404` (foreign/unknown ride), `409 ILLEGAL_STATE_TRANSITION` (ride not `COMPLETED` or payment not `PENDING`-or-already-`PAID` edge cases handled by returning `PAID`).
 
 ## 9. Health (public)
 
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/health` | 🔓 | Liveness: `200 {"status":"ok"}` — no DB call |
-| GET | `/health/ready` | 🔓 | Readiness: `200` if `SELECT 1` succeeds, else `503` |
+| Method | Path            | Auth | Description                                         |
+| ------ | --------------- | ---- | --------------------------------------------------- |
+| GET    | `/health`       | 🔓   | Liveness: `200 {"status":"ok"}` — no DB call        |
+| GET    | `/health/ready` | 🔓   | Readiness: `200` if `SELECT 1` succeeds, else `503` |
 
 Used by Docker healthchecks, Compose `depends_on: condition: service_healthy`, and cloud host probes ([deployment.md](deployment.md)).
 
 ## 10. Endpoint summary (quick reference)
 
-| Method | Path | Role | Purpose |
-|---|---|---|---|
-| POST | `/auth/register` · `/auth/login` · `/auth/refresh` · `/auth/logout` | 🔓 | auth lifecycle |
-| GET | `/auth/me` | any | current profile |
-| GET | `/zones` | 🔓 | zone list |
-| POST | `/fare/estimate` | PASSENGER | pre-request fare |
-| POST | `/rides` | PASSENGER | request ride (idempotent) |
-| GET | `/rides` · `/rides/:id` | PASSENGER | list/history + detail |
-| POST | `/rides/:id/cancel` | PASSENGER | cancel own (pre-start) |
-| GET | `/rides/:id/payment` · POST `/rides/:id/payment/simulate` | PASSENGER | simulated payment |
-| GET | `/driver/pools` (+`?status=`) · `/driver/pools/:id` | DRIVER | queue, detail, history |
-| POST | `/driver/pools/:id/accept` · `/arrive` · `/start` · `/complete` · `/cancel` | DRIVER | trip progression |
-| GET/POST | `/vehicles` · PATCH `/vehicles/:id` | DRIVER | Tesla registry + online toggle |
-| GET | `/health` · `/health/ready` | 🔓 | probes |
+| Method   | Path                                                                        | Role      | Purpose                        |
+| -------- | --------------------------------------------------------------------------- | --------- | ------------------------------ |
+| POST     | `/auth/register` · `/auth/login` · `/auth/refresh` · `/auth/logout`         | 🔓        | auth lifecycle                 |
+| GET      | `/auth/me`                                                                  | any       | current profile                |
+| GET      | `/zones`                                                                    | 🔓        | zone list                      |
+| POST     | `/fare/estimate`                                                            | PASSENGER | pre-request fare               |
+| POST     | `/rides`                                                                    | PASSENGER | request ride (idempotent)      |
+| GET      | `/rides` · `/rides/:id`                                                     | PASSENGER | list/history + detail          |
+| POST     | `/rides/:id/cancel`                                                         | PASSENGER | cancel own (pre-start)         |
+| GET      | `/rides/:id/payment` · POST `/rides/:id/payment/simulate`                   | PASSENGER | simulated payment              |
+| GET      | `/driver/pools` (+`?status=`) · `/driver/pools/:id`                         | DRIVER    | queue, detail, history         |
+| POST     | `/driver/pools/:id/accept` · `/arrive` · `/start` · `/complete` · `/cancel` | DRIVER    | trip progression               |
+| GET/POST | `/vehicles` · PATCH `/vehicles/:id`                                         | DRIVER    | Tesla registry + online toggle |
+| GET      | `/health` · `/health/ready`                                                 | 🔓        | probes                         |
 
 Every row above maps to concrete tests in [testing.md](testing.md) and requirements in [requirements.md](requirements.md) (see the [matrix](traceability.md)).

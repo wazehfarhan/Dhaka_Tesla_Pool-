@@ -44,4 +44,3 @@ function bootstrap(): void {
 }
 
 bootstrap();
-
