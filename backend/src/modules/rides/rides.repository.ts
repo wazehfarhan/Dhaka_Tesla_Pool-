@@ -14,7 +14,16 @@ type RidesClientShim = Pick<
   | 'fare'
   | 'payment'
   | 'rideStatusHistory'
->;
+> & {
+  /**
+   * `$queryRaw` is here for one method only: `releaseSeats`, the raw conditional
+   * UPDATE that returns cancelled seats (architecture §7 requires the raw form,
+   * and it is what keeps `seats_taken = Σ ACTIVE memberships` true under
+   * concurrency). It stays on the interface rather than being cast at the call
+   * site so the seat accounting cannot quietly lose its atomicity.
+   */
+  $queryRaw: Prisma.TransactionClient['$queryRaw'];
+};
 
 export interface CreateHistoryInput {
   entityType: HistoryEntity;
@@ -99,6 +108,69 @@ export function createRidesRepository(prisma: RidesPersistenceClient) {
 
     async findPayment(rideRequestId: string) {
       return prisma.payment.findUnique({ where: { rideRequestId } });
+    },
+
+    /** `PENDING → PAID` for the simulated payment (api.md §8, PRD §13). */
+    async markPaymentPaid(paymentId: string) {
+      return prisma.payment.update({
+        where: { id: paymentId },
+        data: { status: 'PAID', paidAt: new Date() },
+      });
+    },
+
+    /**
+     * The conditional cancellation flip — the atomic half of
+     * `POST /rides/:id/cancel`. `count === 0` means the ride moved on (the
+     * driver started it, or a racing cancel won) and the service turns that into
+     * the documented 409 (api.md §5.4).
+     */
+    async claimRideCancellation(rideId: string, expected: readonly RideStatus[]) {
+      const result = await prisma.rideRequest.updateMany({
+        where: { id: rideId, status: { in: [...expected] } },
+        data: { status: 'CANCELLED', updatedAt: new Date() },
+      });
+      return result.count;
+    },
+
+    /**
+     * Give the seats back — the mirror of matching's `claimSeats` (PRD §14:
+     * "seats freed atomically"). The conditional UPDATE keeps the documented
+     * invariant `seats_taken = Σ ACTIVE memberships` (database.md §5) true under
+     * concurrency: racing cancels subtract only their own seats and the row lock
+     * serialises them.
+     */
+    async releaseSeats(poolId: string, seats: number) {
+      const rows = await prisma.$queryRaw<Array<{ id: string; seats_taken: number }>>`
+        UPDATE pools
+           SET seats_taken = seats_taken - ${seats}::int,
+               updated_at = now()
+         WHERE id = ${poolId}::uuid
+           AND seats_taken >= ${seats}::int
+       RETURNING id, seats_taken
+      `;
+      const row = rows[0];
+      if (row === undefined) return null;
+      return { id: row.id, seatsTaken: row.seats_taken };
+    },
+
+    /** The membership holding this ride's seats — flipped to CANCELLED on cancel. */
+    async findMemberByRide(rideId: string) {
+      return prisma.poolMember.findFirst({ where: { rideRequestId: rideId } });
+    },
+
+    async cancelMember(memberId: string) {
+      return prisma.poolMember.update({
+        where: { id: memberId },
+        data: { status: 'CANCELLED', cancelledAt: new Date() },
+      });
+    },
+
+    /** Abandon the pool once its last active member left (PRD §14, `POOL_EMPTY`). */
+    async cancelPool(poolId: string) {
+      return prisma.pool.update({
+        where: { id: poolId },
+        data: { status: 'CANCELLED', updatedAt: new Date() },
+      });
     },
 
     /** Append-only trail in insertion order — the ride/pool timeline (api.md §5.3). */

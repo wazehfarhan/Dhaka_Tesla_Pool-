@@ -16,7 +16,7 @@ export interface DriverRouterDependencies {
  *
  * Pool ids are UUID-validated here and ownership-scoped in the service, so a
  * foreign or unknown id is a plain 404 (api.md §1 — no ID probing).
- * `/driver/pools/:id/cancel` joins in Phase 8 (todo.md).
+ * `/driver/pools/:id/cancel` lands in Phase 8 (todo.md).
  */
 export function createDriverRouter({
   database,
@@ -32,6 +32,8 @@ export function createDriverRouter({
   router.post('/driver/pools/:id/arrive', authenticate, authorize('DRIVER'), controller.arrive);
   router.post('/driver/pools/:id/start', authenticate, authorize('DRIVER'), controller.start);
   router.post('/driver/pools/:id/complete', authenticate, authorize('DRIVER'), controller.complete);
+  // api.md §6.5 — the driver's no-show / breakdown path, pre-STARTED only.
+  router.post('/driver/pools/:id/cancel', authenticate, authorize('DRIVER'), controller.cancel);
 
   return router;
 }

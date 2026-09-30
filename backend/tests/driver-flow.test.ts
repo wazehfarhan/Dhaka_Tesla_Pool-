@@ -200,7 +200,23 @@ function driverRoutes(poolId: string): ReadonlyArray<readonly ['get' | 'post', s
     ['post', `/api/v1/driver/pools/${poolId}/arrive`],
     ['post', `/api/v1/driver/pools/${poolId}/start`],
     ['post', `/api/v1/driver/pools/${poolId}/complete`],
+    ['post', `/api/v1/driver/pools/${poolId}/cancel`],
   ];
+}
+
+/** Drive the driver through the given progression actions, asserting each `200`. */
+async function advance(
+  app: Express,
+  poolId: string,
+  token: string,
+  actions: readonly string[],
+): Promise<void> {
+  for (const action of actions) {
+    const res = await request(app)
+      .post(`/api/v1/driver/pools/${poolId}/${action}`)
+      .set(auth(token));
+    expect(res.status, action).toBe(200);
+  }
 }
 
 describe('GET /api/v1/driver/pools — queue, active trip, history (api.md §6.1)', () => {
@@ -678,5 +694,105 @@ describe('driver endpoints — authorization matrix (api.md §10, testing.md §5
     expect([...database.statusHistory.values()].filter((e) => e.toStatus === 'ACCEPTED')).toEqual(
       [],
     );
+  });
+});
+
+describe('POST /api/v1/driver/pools/:id/cancel — no-show / breakdown (api.md §6.5, PRD §14)', () => {
+  it('cancels the pool and every active ride, frees the seats, and never charges', async () => {
+    const { app, driver, database, poolId, rides } = await arrange();
+    await advance(app, poolId, driver.token, ['accept']); // pool ACCEPTED
+
+    const res = await request(app)
+      .post(`/api/v1/driver/pools/${poolId}/cancel`)
+      .set(auth(driver.token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({
+      id: poolId,
+      status: 'CANCELLED',
+      members: [
+        { rideId: rides.nusrat, status: 'CANCELLED' },
+        { rideId: rides.rafiq, status: 'CANCELLED' },
+      ],
+    });
+
+    // Seats went back to the car: the ledger's invariant (database.md §5).
+    expect(database.pools.get(poolId)).toMatchObject({ status: 'CANCELLED', seatsTaken: 0 });
+    for (const ride of [rides.nusrat, rides.rafiq]) {
+      expect(database.rideRequests.get(ride)?.status).toBe('CANCELLED');
+      const member = [...database.poolMembers.values()].find((m) => m.rideRequestId === ride);
+      expect(member?.status).toBe('CANCELLED');
+      expect(member?.cancelledAt).not.toBeNull();
+    }
+
+    // Every cancellation is auditable, for the pool and each ride (PRD §14).
+    const reasons = [...database.statusHistory.values()]
+      .filter((entry) => entry.toStatus === 'CANCELLED')
+      .map((entry) => entry.reason);
+    expect(reasons).toHaveLength(3); // pool + 2 rides
+    expect(new Set(reasons)).toEqual(new Set(['DRIVER_CANCELLED']));
+
+    // No fee, no payment: a cancelled trip is never charged (A-07).
+    expect([...database.fares.values()].map((fare) => fare.status)).toEqual([
+      'ESTIMATED',
+      'ESTIMATED',
+    ]);
+    expect(database.payments.size).toBe(0);
+  });
+
+  it('cancels an OPEN pool too — before the driver ever accepts', async () => {
+    const { app, driver, database, poolId } = await arrange();
+
+    const res = await request(app)
+      .post(`/api/v1/driver/pools/${poolId}/cancel`)
+      .set(auth(driver.token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('CANCELLED');
+    expect(database.pools.get(poolId)).toMatchObject({ status: 'CANCELLED', seatsTaken: 0 });
+  });
+
+  it('refuses once the trip is STARTED with 409 RIDE_ALREADY_STARTED', async () => {
+    const { app, driver, database, poolId } = await arrange();
+    await advance(app, poolId, driver.token, ['accept', 'arrive', 'start']); // pool STARTED
+
+    const res = await request(app)
+      .post(`/api/v1/driver/pools/${poolId}/cancel`)
+      .set(auth(driver.token));
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('RIDE_ALREADY_STARTED');
+    // The refused call persisted nothing.
+    expect(database.pools.get(poolId)?.status).toBe('STARTED');
+    expect(database.pools.get(poolId)?.seatsTaken).toBe(2);
+  });
+
+  it('refuses a second cancel with 409 ILLEGAL_STATE_TRANSITION', async () => {
+    const { app, driver, poolId } = await arrange();
+
+    const first = await request(app)
+      .post(`/api/v1/driver/pools/${poolId}/cancel`)
+      .set(auth(driver.token));
+    expect(first.status).toBe(200);
+
+    const second = await request(app)
+      .post(`/api/v1/driver/pools/${poolId}/cancel`)
+      .set(auth(driver.token));
+    expect(second.status).toBe(409);
+    expect(second.body.error).toMatchObject({
+      code: 'ILLEGAL_STATE_TRANSITION',
+      details: { current: 'CANCELLED' },
+    });
+  });
+
+  it('404s a foreign pool (ownership scope, never 403)', async () => {
+    const { app, otherDriver, poolId } = await arrange();
+
+    const res = await request(app)
+      .post(`/api/v1/driver/pools/${poolId}/cancel`)
+      .set(auth(otherDriver.token));
+
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('NOT_FOUND');
   });
 });

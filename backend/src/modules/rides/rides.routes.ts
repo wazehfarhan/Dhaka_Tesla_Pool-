@@ -29,6 +29,16 @@ export function createRidesRouter({
   router.post('/rides', authenticate, authorize('PASSENGER'), controller.create);
   router.get('/rides', authenticate, authorize('PASSENGER'), controller.list);
   router.get('/rides/:id', authenticate, authorize('PASSENGER'), controller.detail);
+  // api.md §5.4 — the passenger's own pre-start cancel.
+  router.post('/rides/:id/cancel', authenticate, authorize('PASSENGER'), controller.cancel);
+  // api.md §8 — simulated payment: read the row, or settle it (idempotent).
+  router.get('/rides/:id/payment', authenticate, authorize('PASSENGER'), controller.payment);
+  router.post(
+    '/rides/:id/payment/simulate',
+    authenticate,
+    authorize('PASSENGER'),
+    controller.simulatePayment,
+  );
 
   return router;
 }

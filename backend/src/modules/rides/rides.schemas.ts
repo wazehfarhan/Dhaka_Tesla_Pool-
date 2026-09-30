@@ -47,3 +47,17 @@ export const rideIdParamSchema = z.object({
 });
 
 export type RideIdParam = z.infer<typeof rideIdParamSchema>;
+
+/**
+ * `POST /rides/:id/cancel` body (api.md §5.4) — `{ "reason": "optional text" }`.
+ *
+ * The whole body is optional, so an empty body is a valid "cancel it" and a
+ * missing `req.body` (some clients send none) is normalised to `{}` in the
+ * controller. The reason is free text for the operator's benefit; the stored
+ * history reason stays the closed-set `PASSENGER_CANCELLED` (PRD §14).
+ */
+export const cancelRideSchema = z.strictObject({
+  reason: z.string().trim().max(200).optional(),
+});
+
+export type CancelRideInput = z.infer<typeof cancelRideSchema>;

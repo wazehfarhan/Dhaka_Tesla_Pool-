@@ -417,6 +417,23 @@ export function createFakeDatabase(): FakeDatabase {
         ).length;
       },
 
+      // `rides.repository.cancelPool` — the POOL_EMPTY abandon (PRD §14).
+      update: async ({
+        where,
+        data,
+      }: {
+        where: { id: string };
+        data: { status: PoolStatus; updatedAt?: Date };
+      }) => {
+        const row = pools.get(where.id);
+        if (!row) {
+          throw Object.assign(new Error('Record to update not found.'), { code: P2025 });
+        }
+        row.status = data.status;
+        row.updatedAt = data.updatedAt ?? new Date();
+        return { ...row };
+      },
+
       // The conditional transition flip (driver.repository.claimPoolTransition):
       // a status-gated UPDATE, exactly like Postgres under READ COMMITTED — a
       // pool that moved on matches 0 rows, which the service reports as the
@@ -425,11 +442,12 @@ export function createFakeDatabase(): FakeDatabase {
         where,
         data,
       }: {
-        where: { id: string; status: PoolStatus };
+        where: { id: string; status: PoolStatus | { in: PoolStatus[] } };
         data: { status: PoolStatus; updatedAt?: Date };
       }) => {
         const pool = pools.get(where.id);
-        if (!pool || pool.status !== where.status) return { count: 0 };
+        const expected = typeof where.status === 'string' ? [where.status] : where.status.in;
+        if (!pool || !expected.includes(pool.status)) return { count: 0 };
         pool.status = data.status;
         pool.updatedAt = data.updatedAt ?? new Date();
         return { count: 1 };
@@ -705,6 +723,27 @@ export function createFakeDatabase(): FakeDatabase {
         row.updatedAt = new Date();
         return { ...row };
       },
+
+      /**
+       * The conditional cancellation flip (rides.repository.claimRideCancellation)
+       * — a status-set-gated UPDATE, so a ride that moved on (the driver started
+       * it, or a racing cancel won) matches 0 rows and the service answers the
+       * documented 409 (api.md §5.4).
+       */
+      updateMany: async ({
+        where,
+        data,
+      }: {
+        where: { id: string; status: RideStatus | { in: RideStatus[] } };
+        data: { status: RideStatus; updatedAt?: Date };
+      }) => {
+        const row = rideRequests.get(where.id);
+        const expected = typeof where.status === 'string' ? [where.status] : where.status.in;
+        if (!row || !expected.includes(row.status)) return { count: 0 };
+        row.status = data.status;
+        row.updatedAt = data.updatedAt ?? new Date();
+        return { count: 1 };
+      },
     },
 
     poolMember: {
@@ -742,6 +781,31 @@ export function createFakeDatabase(): FakeDatabase {
             member.poolId === where.poolId &&
             (where.status === undefined || member.status === where.status),
         ).length;
+      },
+
+      /** The membership holding one ride's seats — the cancellation lookup. */
+      findFirst: async ({ where }: { where: { rideRequestId: string } }) => {
+        for (const member of poolMembers.values()) {
+          if (member.rideRequestId === where.rideRequestId) return { ...member };
+        }
+        return null;
+      },
+
+      /** `POST /rides/:id/cancel` — status + `cancelled_at` in one write. */
+      update: async ({
+        where,
+        data,
+      }: {
+        where: { id: string };
+        data: { status: MemberStatus; cancelledAt?: Date | null };
+      }) => {
+        const row = poolMembers.get(where.id);
+        if (!row) {
+          throw Object.assign(new Error('Record to update not found.'), { code: P2025 });
+        }
+        row.status = data.status;
+        if (data.cancelledAt !== undefined) row.cancelledAt = data.cancelledAt;
+        return { ...row };
       },
     },
 
@@ -837,6 +901,23 @@ export function createFakeDatabase(): FakeDatabase {
         payments.set(row.id, row);
         return { ...row };
       },
+
+      /** `POST /rides/:id/payment/simulate` — `PENDING → PAID` (api.md §8). */
+      update: async ({
+        where,
+        data,
+      }: {
+        where: { id: string };
+        data: { status: PaymentStatus; paidAt?: Date | null };
+      }) => {
+        const row = payments.get(where.id);
+        if (!row) {
+          throw Object.assign(new Error('Record to update not found.'), { code: P2025 });
+        }
+        row.status = data.status;
+        if (data.paidAt !== undefined) row.paidAt = data.paidAt;
+        return { ...row };
+      },
     },
 
     // Append-only transition trail — the ride/pool timeline (api.md §5.3).
@@ -882,7 +963,26 @@ export function createFakeDatabase(): FakeDatabase {
     // with the same conditional-UPDATE semantics Postgres applies under a row lock.
     $queryRaw: async (strings: TemplateStringsArray | readonly string[], ...values: unknown[]) => {
       const sql = strings.join('?');
-      if (sql.includes('UPDATE pools') && sql.includes('RETURNING id, seats_taken')) {
+      // The seat ledger's two conditional UPDATEs, distinguished by their
+      // arithmetic: the claim adds, the release subtracts (PRD §14). Both keep
+      // Postgres' row-lock semantics — the fake has no locks, but the guard
+      // conditions are reproduced faithfully so a wrong `WHERE` would fail here.
+      const isRelease = sql.includes('seats_taken - ') && sql.includes('seats_taken >= ');
+      const isClaim = sql.includes('seats_taken + ') && sql.includes('RETURNING id, seats_taken');
+
+      if (isRelease) {
+        // Bind order: seats, poolId, seats (the guard repeats the parameter).
+        const [seats, poolId, guard] = values as [number, string, number];
+        const pool = pools.get(poolId);
+        if (pool && pool.seatsTaken >= guard && pool.seatsTaken - seats >= 0) {
+          pool.seatsTaken -= seats;
+          pool.updatedAt = new Date();
+          return [{ id: pool.id, seats_taken: pool.seatsTaken }];
+        }
+        return [];
+      }
+
+      if (isClaim) {
         const [seats, poolId] = values as [number, string];
         const pool = pools.get(poolId);
         if (pool && pool.status === 'OPEN' && pool.seatsTaken + seats <= pool.seatCapacity) {

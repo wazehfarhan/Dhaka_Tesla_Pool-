@@ -160,3 +160,13 @@ export class ActiveRideExistsError extends AppError {
     super('ACTIVE_RIDE_EXISTS', message);
   }
 }
+
+/**
+ * The trip is under way, so a cancellation is refused (PRD §14, api.md §5.4).
+ * Its own code so the UI can distinguish "too late" from "wrong state".
+ */
+export class RideAlreadyStartedError extends AppError {
+  constructor(message = 'The trip has already started and can no longer be cancelled.') {
+    super('RIDE_ALREADY_STARTED', message);
+  }
+}

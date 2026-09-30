@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { PoolStatus } from '../src/generated/prisma/client.js';
 import {
+  CANCELLABLE_POOL_STATUSES,
+  CANCELLABLE_RIDE_STATUSES,
   DRIVER_TRANSITIONS,
+  decideCancel,
   decideTransition,
   type DriverAction,
 } from '../src/modules/driver/driver.transitions.js';
@@ -96,5 +99,50 @@ describe('driver state machine (FR-RIDE-001, PRD §8)', () => {
       (status) => !ACTIONS.some((action) => decideTransition(action, status).ok),
     );
     expect(unreachable).toEqual(['COMPLETED', 'CANCELLED']);
+  });
+});
+
+/**
+ * The other exit from the graph: cancellation (PRD §8's diagram, §14's table).
+ * Same pure-decision discipline, so the refusals are proven without HTTP or a
+ * database — and the two codes are distinguishable, which is what lets the UI
+ * say "the trip has started" instead of "wrong state" (api.md §5.4).
+ */
+describe('cancellation rules (FR-PASSENGER-005, FR-DRIVER-005, PRD §14)', () => {
+  it('allows a ride to be cancelled from every pre-start status', () => {
+    expect(CANCELLABLE_RIDE_STATUSES).toEqual(['REQUESTED', 'ACCEPTED', 'DRIVER_ARRIVED']);
+    for (const status of CANCELLABLE_RIDE_STATUSES) {
+      expect(decideCancel('ride', status)).toEqual({ ok: true });
+    }
+  });
+
+  it('refuses a ride once STARTED with RIDE_ALREADY_STARTED, and after with the generic 409', () => {
+    expect(decideCancel('ride', 'STARTED')).toEqual({
+      ok: false,
+      code: 'RIDE_ALREADY_STARTED',
+      current: 'STARTED',
+    });
+    for (const terminal of ['COMPLETED', 'CANCELLED'] as const) {
+      expect(decideCancel('ride', terminal)).toEqual({
+        ok: false,
+        code: 'ILLEGAL_STATE_TRANSITION',
+        current: terminal,
+      });
+    }
+  });
+
+  it('gives the driver the same window on the pool, keyed on the pool statuses', () => {
+    expect(CANCELLABLE_POOL_STATUSES).toEqual(['OPEN', 'ACCEPTED', 'DRIVER_ARRIVED']);
+    for (const status of CANCELLABLE_POOL_STATUSES) {
+      expect(decideCancel('pool', status)).toEqual({ ok: true });
+    }
+    expect(decideCancel('pool', 'STARTED').ok).toBe(false);
+    expect(decideCancel('pool', 'STARTED')).toMatchObject({ code: 'RIDE_ALREADY_STARTED' });
+  });
+
+  it('never lets a ride be cancelled from a status only a pool can hold', () => {
+    // `OPEN` is the pool's pre-acceptance phase; a ride is never `OPEN`.
+    expect(decideCancel('ride', 'OPEN').ok).toBe(false);
+    expect(decideCancel('pool', 'REQUESTED').ok).toBe(false);
   });
 });

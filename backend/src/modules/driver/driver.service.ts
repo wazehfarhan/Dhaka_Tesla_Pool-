@@ -1,14 +1,27 @@
 import type { Database } from '../../db/client.js';
 import { PoolStatus } from '../../generated/prisma/client.js';
 import type { RideStatus } from '../../generated/prisma/client.js';
-import { AppError, ConflictError, NotFoundError } from '../../shared/errors.js';
+import {
+  AppError,
+  ConflictError,
+  NotFoundError,
+  RideAlreadyStartedError,
+} from '../../shared/errors.js';
 import { createFareService } from '../fare/fare.service.js';
 import { createDriverRepository, type PoolRideRow } from './driver.repository.js';
 import type { ListPoolsQuery } from './driver.schemas.js';
-import { DRIVER_TRANSITIONS, type DriverAction } from './driver.transitions.js';
+import {
+  CANCELLABLE_POOL_STATUSES,
+  CANCEL_REASONS,
+  DRIVER_TRANSITIONS,
+  decideCancel,
+  type CancelDecision,
+  type DriverAction,
+} from './driver.transitions.js';
 import type {
   DriverPoolDetail,
   DriverPoolListItem,
+  PoolCancelResponse,
   PoolMemberView,
   TransitionResponse,
 } from './driver.types.js';
@@ -46,6 +59,25 @@ function zoneNameResolver(zones: ReadonlyArray<{ id: number; name: string }>) {
   };
 }
 
+/**
+ * The refusal for a refused cancellation: `STARTED` gets its own code so the UI
+ * can say "the trip has already started" (PRD §14), anything already terminal
+ * gets the generic state-machine 409 (api.md §5.4). `current` rides along as
+ * the `details` field, mirroring the progression endpoints' `{current, expected}`.
+ */
+function cancelError(decision: Exclude<CancelDecision, { ok: true }>): AppError {
+  if (decision.code === 'RIDE_ALREADY_STARTED') {
+    return new RideAlreadyStartedError();
+  }
+  return new ConflictError(
+    'ILLEGAL_STATE_TRANSITION',
+    `A ${decision.current} ride can no longer be cancelled.`,
+    {
+      current: decision.current,
+    },
+  );
+}
+
 /** One roster row, shared by the detail and every transition response (api.md §6.2/6.4). */
 function toMemberView(row: PoolRideRow): PoolMemberView {
   return {
@@ -78,6 +110,8 @@ export interface DriverService {
   listPools(driverId: string, query: ListPoolsQuery): Promise<ListPoolsResult>;
   getPoolDetail(driverId: string, poolId: string): Promise<DriverPoolDetail>;
   transition(driverId: string, poolId: string, action: DriverAction): Promise<TransitionResponse>;
+  /** `POST /driver/pools/:id/cancel` — the driver's own pre-start abandon (api.md §6.5). */
+  cancelPool(driverId: string, poolId: string): Promise<PoolCancelResponse>;
 }
 
 export function createDriverService({ database }: { database?: Database }): DriverService {
@@ -265,6 +299,69 @@ export function createDriverService({ database }: { database?: Database }): Driv
           status: rule.to,
           members: rides.map(toMemberView),
         };
+      });
+    },
+
+    /**
+     * `POST /driver/pools/:id/cancel` (api.md §6.5, PRD §14) — the driver's
+     * no-show / breakdown path, refused once the trip is `STARTED`.
+     *
+     * One transaction, same discipline as `transition`: ownership → conditional
+     * pool flip → cascade `CANCELLED` onto every *active* ride (a member who
+     * already cancelled keeps their own terminal row) → release the seats →
+     * history for the pool and each ride with reason `DRIVER_CANCELLED`. Fares
+     * stay `ESTIMATED` and no payment is created: a cancelled trip is never
+     * charged (PRD §14 — no cancellation fee, A-07).
+     */
+    async cancelPool(driverId, poolId): Promise<PoolCancelResponse> {
+      return db().prisma.$transaction(async (tx) => {
+        const pools = createDriverRepository(tx);
+
+        const pool = await pools.findOwnedPool(driverId, poolId);
+        if (!pool) throw new NotFoundError('Pool not found.');
+
+        const current = pool.status;
+        const decision = decideCancel('pool', current);
+        if (!decision.ok) throw cancelError(decision);
+
+        // Atomic gate: 0 rows means the pool started or was cancelled under us.
+        const claimed = await pools.claimPoolCancellation(poolId, CANCELLABLE_POOL_STATUSES);
+        if (claimed === 0) {
+          const fresh = await pools.findPool(poolId);
+          const latest = fresh?.status ?? current;
+          throw cancelError(decideCancel('pool', latest) as Exclude<CancelDecision, { ok: true }>);
+        }
+
+        const activeRides = await pools.listActivePoolRides(poolId);
+        for (const ride of activeRides) {
+          await pools.updateRideStatus(ride.id, 'CANCELLED');
+          const member = await pools.findMemberByRide(ride.id);
+          if (member) await pools.cancelMember(member.id);
+          await pools.createHistory({
+            entityType: 'RIDE_REQUEST',
+            entityId: ride.id,
+            fromStatus: ride.status,
+            toStatus: 'CANCELLED',
+            changedBy: driverId,
+            reason: CANCEL_REASONS.driver,
+          });
+        }
+        await pools.createHistory({
+          entityType: 'POOL',
+          entityId: poolId,
+          fromStatus: current,
+          toStatus: 'CANCELLED',
+          changedBy: driverId,
+          reason: CANCEL_REASONS.driver,
+        });
+
+        // Seats go back to the car in the same transaction (PRD §14).
+        for (const ride of activeRides) {
+          await pools.releaseSeats(poolId, ride.seats);
+        }
+
+        const rides = await pools.listPoolRides(poolId);
+        return { id: poolId, status: 'CANCELLED', members: rides.map(toMemberView) };
       });
     },
   };

@@ -62,3 +62,10 @@ export interface TransitionResponse {
   status: string;
   members: PoolMemberView[];
 }
+
+/**
+ * The `200` body of `POST /driver/pools/:id/cancel` (api.md §6.5) — the same
+ * `TransitionResponse` shape with the pool `CANCELLED` and every active member
+ * cancelled along with it (PRD §14: no-show / breakdown cancels the whole trip).
+ */
+export type PoolCancelResponse = TransitionResponse;

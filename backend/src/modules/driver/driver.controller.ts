@@ -17,6 +17,7 @@ export function createDriverController({ database }: { database?: Database }): {
   arrive: RequestHandler;
   start: RequestHandler;
   complete: RequestHandler;
+  cancel: RequestHandler;
 } {
   const service: DriverService = createDriverService({ database });
 
@@ -43,6 +44,14 @@ export function createDriverController({ database }: { database?: Database }): {
       res.status(200).json({ success: true, data });
     };
 
+  /** `POST /driver/pools/:id/cancel` — the driver's own abandon (api.md §6.5). */
+  const cancel: RequestHandler = async (req, res) => {
+    if (!req.user) throw new UnauthenticatedError();
+    const { id } = poolIdParamSchema.parse(req.params);
+    const data = await service.cancelPool(req.user.id, id);
+    res.status(200).json({ success: true, data });
+  };
+
   return {
     list,
     detail,
@@ -50,5 +59,6 @@ export function createDriverController({ database }: { database?: Database }): {
     arrive: transition('arrive'),
     start: transition('start'),
     complete: transition('complete'),
+    cancel,
   };
 }

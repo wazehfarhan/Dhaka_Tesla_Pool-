@@ -1,7 +1,12 @@
 import type { RequestHandler } from 'express';
 import type { Database } from '../../db/client.js';
 import { UnauthenticatedError } from '../../shared/errors.js';
-import { createRideSchema, listRidesQuerySchema, rideIdParamSchema } from './rides.schemas.js';
+import {
+  cancelRideSchema,
+  createRideSchema,
+  listRidesQuerySchema,
+  rideIdParamSchema,
+} from './rides.schemas.js';
 import { createRidesService } from './rides.service.js';
 
 /**
@@ -13,6 +18,9 @@ export function createRidesController({ database }: { database?: Database }): {
   create: RequestHandler;
   list: RequestHandler;
   detail: RequestHandler;
+  cancel: RequestHandler;
+  payment: RequestHandler;
+  simulatePayment: RequestHandler;
 } {
   const service = createRidesService({ database });
 
@@ -38,5 +46,29 @@ export function createRidesController({ database }: { database?: Database }): {
     res.status(200).json({ success: true, data: ride });
   };
 
-  return { create, list, detail };
+  const cancel: RequestHandler = async (req, res) => {
+    if (!req.user) throw new UnauthenticatedError();
+    const { id } = rideIdParamSchema.parse(req.params);
+    // The body is optional (`{reason?}`) — a client that sends none still means
+    // "cancel", so normalise the absent body to `{}` before parsing.
+    const { reason } = cancelRideSchema.parse(req.body ?? {});
+    const ride = await service.cancelRide(req.user.id, id, reason);
+    res.status(200).json({ success: true, data: ride });
+  };
+
+  const payment: RequestHandler = async (req, res) => {
+    if (!req.user) throw new UnauthenticatedError();
+    const { id } = rideIdParamSchema.parse(req.params);
+    const data = await service.getPayment(req.user.id, id);
+    res.status(200).json({ success: true, data });
+  };
+
+  const simulatePayment: RequestHandler = async (req, res) => {
+    if (!req.user) throw new UnauthenticatedError();
+    const { id } = rideIdParamSchema.parse(req.params);
+    const data = await service.simulatePayment(req.user.id, id);
+    res.status(200).json({ success: true, data });
+  };
+
+  return { create, list, detail, cancel, payment, simulatePayment };
 }

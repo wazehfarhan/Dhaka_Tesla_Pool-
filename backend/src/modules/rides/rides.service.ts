@@ -1,12 +1,31 @@
 import type { Database } from '../../db/client.js';
 import { RideStatus } from '../../generated/prisma/client.js';
-import { AppError, NotFoundError, SameZoneError, ZoneNotFoundError } from '../../shared/errors.js';
+import {
+  AppError,
+  ConflictError,
+  NotFoundError,
+  RideAlreadyStartedError,
+  SameZoneError,
+  ZoneNotFoundError,
+} from '../../shared/errors.js';
+import {
+  CANCELLABLE_RIDE_STATUSES,
+  CANCEL_REASONS,
+  decideCancel,
+  type CancelDecision,
+} from '../driver/driver.transitions.js';
 import { createFareService, estimateFare } from '../fare/fare.service.js';
 import type { FareBreakdown } from '../fare/fare.types.js';
 import { createMatchedRide, type PersistHook } from '../matching/matching.service.js';
 import { createRidesRepository, type RidesPersistenceClient } from './rides.repository.js';
 import type { CreateRideInput, ListRidesQuery } from './rides.schemas.js';
-import type { CreateRideResponse, RideDetail, RideListItem } from './rides.types.js';
+import type {
+  CreateRideResponse,
+  PaymentView,
+  RideCancelResponse,
+  RideDetail,
+  RideListItem,
+} from './rides.types.js';
 
 /**
  * Passenger flow — api.md §5, requirements FR-POOL-001…003 and FR-HISTORY-001.
@@ -34,6 +53,42 @@ function perSeatFromTotal(totalPoisha: number, seats: number): number {
   return (totalPoisha - (totalPoisha % seats)) / seats;
 }
 
+/**
+ * The refusal for a refused cancellation, shared with the driver pool-cancel
+ * path (PRD §14): `STARTED` gets its own code so the UI can say "the trip has
+ * already started", anything already terminal gets the generic 409
+ * (api.md §5.4). `current` rides along as `details`, mirroring the progression
+ * endpoints' `{current, expected}`.
+ */
+function cancelRefusal(decision: Exclude<CancelDecision, { ok: true }>): AppError {
+  if (decision.code === 'RIDE_ALREADY_STARTED') return new RideAlreadyStartedError();
+  return new ConflictError(
+    'ILLEGAL_STATE_TRANSITION',
+    `A ${decision.current} ride can no longer be cancelled.`,
+    { current: decision.current },
+  );
+}
+
+/** A payment row in the documented wire shape (api.md §8 — amounts are poisha). */
+function toPaymentView(payment: {
+  id: string;
+  rideRequestId: string;
+  amountPoisha: number;
+  status: string;
+  method: string;
+  paidAt: Date | null;
+}): PaymentView {
+  return {
+    id: payment.id,
+    rideId: payment.rideRequestId,
+    amountPoisha: payment.amountPoisha,
+    currency: 'BDT',
+    status: payment.status,
+    method: payment.method,
+    paidAt: payment.paidAt === null ? null : payment.paidAt.toISOString(),
+  };
+}
+
 /** `201` on a fresh ride, `200` when the request was an idempotent replay (api.md §5.1). */
 export interface CreateRideResult {
   status: 200 | 201;
@@ -49,6 +104,12 @@ export interface RidesService {
   createRide(passengerId: string, input: CreateRideInput): Promise<CreateRideResult>;
   listRides(passengerId: string, query: ListRidesQuery): Promise<ListRidesResult>;
   getRideDetail(passengerId: string, rideId: string): Promise<RideDetail>;
+  /** `POST /rides/:id/cancel` — the passenger's own pre-start exit (api.md §5.4). */
+  cancelRide(passengerId: string, rideId: string, reason?: string): Promise<RideCancelResponse>;
+  /** `GET /rides/:id/payment` — 404 until the trip completes (api.md §8). */
+  getPayment(passengerId: string, rideId: string): Promise<PaymentView>;
+  /** `POST /rides/:id/payment/simulate` — idempotent `PENDING → PAID` (api.md §8). */
+  simulatePayment(passengerId: string, rideId: string): Promise<PaymentView>;
 }
 
 /**
@@ -311,6 +372,132 @@ export function createRidesService({ database }: { database?: Database }): Rides
           payment === null ? null : { status: payment.status, amountPoisha: payment.amountPoisha },
         createdAt: ride.createdAt.toISOString(),
       };
+    },
+
+    /**
+     * `POST /rides/:id/cancel` (api.md §5.4, PRD §14) — the passenger's own
+     * pre-start exit.
+     *
+     * One transaction: ownership → conditional ride flip → membership
+     * `CANCELLED` → seats released → history with reason `PASSENGER_CANCELLED`.
+     * If that leaves the pool with **zero** active members the pool is
+     * abandoned too (`POOL_EMPTY`) — nobody is left to serve. Other members are
+     * never touched (PRD §14: "other members' rides, seats and fares are never
+     * affected"), and the cancelled ride's fare stays `ESTIMATED` with no
+     * payment: a cancelled trip is never charged (A-07, no cancellation fee).
+     */
+    async cancelRide(passengerId, rideId, reason): Promise<RideCancelResponse> {
+      return db().prisma.$transaction(async (tx) => {
+        const rides = createRidesRepository(tx);
+
+        // Ownership scope: a foreign or unknown ride is a 404 (api.md §1).
+        const ride = await rides.findOwnedRide(passengerId, rideId);
+        if (!ride) throw new NotFoundError('Ride not found.');
+
+        const current = ride.status;
+        const decision = decideCancel('ride', current);
+        if (!decision.ok) throw cancelRefusal(decision);
+
+        // Atomic gate: 0 rows means the driver started it (or someone else
+        // cancelled it) between the read above and here.
+        const claimed = await rides.claimRideCancellation(rideId, CANCELLABLE_RIDE_STATUSES);
+        if (claimed === 0) {
+          const fresh = await rides.findOwnedRide(passengerId, rideId);
+          const latest = fresh?.status ?? current;
+          throw cancelRefusal(
+            decideCancel('ride', latest) as Exclude<CancelDecision, { ok: true }>,
+          );
+        }
+
+        const member = await rides.findMemberByRide(rideId);
+        if (member) {
+          await rides.cancelMember(member.id);
+          await rides.releaseSeats(ride.poolId, member.seats);
+        }
+        await rides.createHistory({
+          entityType: 'RIDE_REQUEST',
+          entityId: rideId,
+          fromStatus: current,
+          toStatus: 'CANCELLED',
+          changedBy: passengerId,
+          reason: CANCEL_REASONS.passenger,
+        });
+
+        // Last one out cancels the pool (PRD §14, reason `POOL_EMPTY`).
+        const pool = await rides.findPool(ride.poolId);
+        if (!pool) throw new AppError('INTERNAL', 'The ride references a missing pool.');
+        const remaining = await rides.countActivePoolMembers(ride.poolId);
+        let poolStatus = pool.status;
+        if (remaining === 0 && pool.status !== 'CANCELLED') {
+          await rides.cancelPool(ride.poolId);
+          await rides.createHistory({
+            entityType: 'POOL',
+            entityId: ride.poolId,
+            fromStatus: pool.status,
+            toStatus: 'CANCELLED',
+            changedBy: null, // system — nobody chose this; the roster emptied
+            reason: CANCEL_REASONS.poolEmpty,
+          });
+          poolStatus = 'CANCELLED';
+        }
+
+        const fresh = await rides.findOwnedRide(passengerId, rideId);
+        return {
+          id: rideId,
+          status: fresh?.status ?? 'CANCELLED',
+          poolId: ride.poolId,
+          poolStatus,
+          seats: ride.seats,
+          reason: reason ?? null,
+          createdAt: ride.createdAt.toISOString(),
+        };
+      });
+    },
+
+    /**
+     * `GET /rides/:id/payment` (api.md §8) — the current payment row.
+     *
+     * A payment only exists after pool completion, so a ride that has not
+     * completed answers the documented `404` rather than a fabricated
+     * "PENDING" the passenger could then try to pay.
+     */
+    async getPayment(passengerId, rideId): Promise<PaymentView> {
+      const rides = createRidesRepository(root());
+      const ride = await rides.findOwnedRide(passengerId, rideId);
+      if (!ride) throw new NotFoundError('Ride not found.');
+      const payment = await rides.findPayment(rideId);
+      if (!payment) throw new NotFoundError('No payment exists for this ride yet.');
+      return toPaymentView(payment);
+    },
+
+    /**
+     * `POST /rides/:id/payment/simulate` (api.md §8) — `PENDING → PAID`.
+     *
+     * Idempotent by design: a repeat returns the same `PAID` row (`UNIQUE
+     * (ride_request_id)` means there is only ever one payment per ride), and a
+     * ride that has not completed is refused with the documented
+     * `409 ILLEGAL_STATE_TRANSITION`. `SIMULATED` is the MVP's stand-in for a
+     * gateway call (PRD §13 — no real processor in the MVP).
+     */
+    async simulatePayment(passengerId, rideId): Promise<PaymentView> {
+      return db().prisma.$transaction(async (tx) => {
+        const rides = createRidesRepository(tx);
+        const ride = await rides.findOwnedRide(passengerId, rideId);
+        if (!ride) throw new NotFoundError('Ride not found.');
+
+        const payment = await rides.findPayment(rideId);
+        // No payment row ⇒ the trip never completed, so there is nothing to pay.
+        if (!payment || ride.status !== 'COMPLETED') {
+          throw new ConflictError(
+            'ILLEGAL_STATE_TRANSITION',
+            'A ride can only be paid once it is COMPLETED.',
+            { current: ride.status, expected: 'COMPLETED' },
+          );
+        }
+        // Already paid — the endpoint's natural idempotency (api.md §8).
+        if (payment.status === 'PAID') return toPaymentView(payment);
+        return toPaymentView(await rides.markPaymentPaid(payment.id));
+      });
     },
   };
 }

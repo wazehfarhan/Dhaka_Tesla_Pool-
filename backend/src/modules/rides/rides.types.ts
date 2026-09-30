@@ -54,6 +54,39 @@ export interface RideListItem {
   createdAt: string;
 }
 
+/**
+ * The `200` body of `POST /rides/:id/cancel` (api.md §5.4) — the cancelled ride
+ * plus its pool's new state, so the UI can explain "you left; the trip is off"
+ * (pool `CANCELLED`) or "the others are still going" (pool unchanged) without a
+ * second round trip.
+ */
+export interface RideCancelResponse {
+  id: string;
+  status: string;
+  poolId: string;
+  /** The pool's status after the cancellation — `CANCELLED` only if it emptied. */
+  poolStatus: string;
+  seats: number;
+  /** The caller's optional note (api.md §5.4 body), echoed back. */
+  reason: string | null;
+  createdAt: string;
+}
+
+/**
+ * `GET /rides/:id/payment` and `POST /rides/:id/payment/simulate` (api.md §8).
+ * `currency` is always `BDT` and amounts are integer poisha (ADR-003) — the API
+ * never sends formatted money, the client renders it.
+ */
+export interface PaymentView {
+  id: string;
+  rideId: string;
+  amountPoisha: number;
+  currency: string;
+  status: string;
+  method: string;
+  paidAt: string | null;
+}
+
 /** `GET /rides/:id` — ride + pool summary, timeline, fare, payment (api.md §5.3). */
 export interface RideDetail {
   id: string;
