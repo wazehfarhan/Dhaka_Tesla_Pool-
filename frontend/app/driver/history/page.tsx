@@ -20,7 +20,9 @@ import {
   ErrorBanner,
   Notice,
   PageHeading,
+  RouteLine,
   Skeleton,
+  Stat,
   StatusChip,
 } from '@/components/ui';
 import { fetchDriverPools } from '@/lib/api';
@@ -96,35 +98,46 @@ export default function DriverHistoryPage() {
 
       {!loading && pools.length > 0 && (
         <>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Stat label="Trips on record" value={pools.length} />
+            <Stat
+              label="Seats carried"
+              value={collectedPoisha}
+              hint="Passenger seats on completed trips"
+              tone="brand"
+            />
+            <Stat
+              label="Cancelled"
+              value={pools.filter((pool) => pool.status === 'CANCELLED').length}
+            />
+          </div>
+
           <Notice tone="info">
-            {pools.length} trip{pools.length === 1 ? '' : 's'} on record ·{' '}
-            <span data-poisha={collectedPoisha}>
-              {collectedPoisha} passenger seat{collectedPoisha === 1 ? '' : 's'} completed
-            </span>{' '}
-            · fares are per passenger and settle on their own ride (api.md §6.4).
+            Every passenger is charged their own fare on their own ride, so the money settles per
+            ride rather than per trip.
           </Notice>
 
           <Card>
-            <ul className="divide-y divide-slate-100 text-sm">
+            <ul className="divide-y divide-ink-900/5 text-sm">
               {pools.map((pool) => (
                 <li
                   key={pool.id}
-                  className="flex flex-wrap items-center justify-between gap-3 py-3"
+                  className="flex flex-wrap items-center justify-between gap-3 py-3.5 first:pt-0 last:pb-0"
                 >
                   <div>
                     <Link
-                      className="font-medium text-emerald-700 hover:underline"
+                      className="font-semibold text-ink-900 hover:text-brand-700"
                       href={`/driver/pools/${pool.id}`}
                     >
-                      {pool.pickupZone} → {pool.destinationZone}
+                      <RouteLine from={pool.pickupZone} to={pool.destinationZone} />
                     </Link>
-                    <p className="text-xs text-slate-500">
+                    <p className="mt-0.5 text-xs text-ink-500">
                       {formatDateTime(pool.createdAt)} · {pool.seatsTaken}/{pool.seatCapacity} ·{' '}
                       {seatsLabel(pool.seatsTaken)} carried
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="text-xs text-slate-600">
+                    <span className="text-xs text-ink-500">
                       {pool.members.map((member) => member.passenger).join(', ')}
                     </span>
                     <StatusChip status={pool.status} label={poolStatusLabel(pool.status)} />

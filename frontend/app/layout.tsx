@@ -9,7 +9,6 @@ export const metadata: Metadata = {
   description:
     'Ride-pooling MVP for Dhaka — passengers share one Tesla, each keeping their own seat, status and fare.',
 };
-
 /**
  * The shell every screen renders inside (ui-ux §8): `header` + `nav` landmarks,
  * then `main`. `AuthProvider` is mounted here — once, above the router — because
@@ -18,10 +17,13 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en">
-      <body className="min-h-screen">
+      <body className="min-h-screen antialiased">
         <AuthProvider>
           <AppHeader />
-          <main className="mx-auto max-w-5xl px-4 py-8">{children}</main>
+          <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">{children}</main>
+          <footer className="mx-auto max-w-6xl px-4 pb-10 text-xs text-ink-400 sm:px-6">
+            Dhaka Tesla Pool — MVP build. One Tesla, shared seats, one fare per passenger.
+          </footer>
         </AuthProvider>
       </body>
     </html>
