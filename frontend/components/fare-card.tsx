@@ -22,22 +22,18 @@ export function FareCard({
   title?: string;
 }) {
   return (
-    <section
-      className="rounded-lg border border-slate-200 bg-white p-4"
-      data-fare-status="ESTIMATE"
-    >
-      <h2 className="font-medium text-slate-900">{title}</h2>
+    <section className="surface p-5 sm:p-6" data-fare-status="ESTIMATE">
+      <h2 className="text-base font-semibold tracking-tight text-ink-900">{title}</h2>
 
-      <p
-        className="mt-3 text-3xl font-semibold text-slate-900"
-        data-poisha={estimate.totalDuePoisha}
-      >
-        {formatBdt(estimate.totalDuePoisha)}
-      </p>
-      <p className="text-sm text-slate-600">
-        {seatsLabel(seats)} · {formatBdt(estimate.perSeatPoisha)} per seat · {estimate.distanceKm}{' '}
-        km
-      </p>
+      <div className="mt-4 rounded-2xl bg-gradient-to-br from-brand-600 to-brand-800 p-5 text-white shadow-sm shadow-brand-700/20">
+        <p className="text-3xl font-bold tracking-tight" data-poisha={estimate.totalDuePoisha}>
+          {formatBdt(estimate.totalDuePoisha)}
+        </p>
+        <p className="mt-1 text-sm text-white/80">
+          {seatsLabel(seats)} · {formatBdt(estimate.perSeatPoisha)} per seat · {estimate.distanceKm}{' '}
+          km
+        </p>
+      </div>
 
       <div className="mt-4">
         <DataList>
@@ -47,7 +43,7 @@ export function FareCard({
           </DataRow>
           <DataRow label="Subtotal">{formatBdt(estimate.subtotalPoisha)}</DataRow>
           <DataRow label={`Pool discount (${estimate.poolDiscountPercent}%)`}>
-            <span className="text-emerald-700">−{formatBdt(estimate.estimatedDiscountPoisha)}</span>
+            <span className="text-brand-700">−{formatBdt(estimate.estimatedDiscountPoisha)}</span>
           </DataRow>
           <DataRow label={`Total (${seatsLabel(seats)})`}>
             <span data-poisha={estimate.totalDuePoisha}>{formatBdt(estimate.totalDuePoisha)}</span>
@@ -55,7 +51,7 @@ export function FareCard({
         </DataList>
       </div>
 
-      <p className="mt-3 text-xs text-slate-500">
+      <p className="mt-4 text-xs leading-relaxed text-ink-500">
         {POOL_DISCOUNT_NOTE}. Without another passenger the fare is{' '}
         {formatBdt(estimate.subtotalPoisha)}.
       </p>
@@ -91,7 +87,10 @@ export function FareBreakdown({
   return (
     <div data-fare-status={fare.status}>
       <div className="flex items-baseline justify-between gap-3">
-        <p className="text-3xl font-semibold text-slate-900" data-poisha={fare.totalPoisha}>
+        <p
+          className="text-3xl font-bold tracking-tight text-ink-900"
+          data-poisha={fare.totalPoisha}
+        >
           {formatBdt(fare.totalPoisha)}
         </p>
         <StatusChip
@@ -109,9 +108,9 @@ export function FareBreakdown({
           <DataRow label="Subtotal">{formatBdt(fare.subtotalPoisha)}</DataRow>
           <DataRow label="Pool discount">
             {discounted ? (
-              <span className="text-emerald-700">−{formatBdt(fare.poolDiscountPoisha)}</span>
+              <span className="text-brand-700">−{formatBdt(fare.poolDiscountPoisha)}</span>
             ) : (
-              <span className="text-slate-500">{formatBdt(0)}</span>
+              <span className="text-ink-400">{formatBdt(0)}</span>
             )}
           </DataRow>
           <DataRow label="Total">
@@ -120,7 +119,7 @@ export function FareBreakdown({
         </DataList>
       </div>
 
-      <p className="mt-3 text-xs text-slate-500">
+      <p className="mt-4 text-xs leading-relaxed text-ink-500">
         {fare.status === 'FINAL'
           ? discounted
             ? 'Final: the group discount applied, so 2+ passengers completed the trip.'

@@ -13,7 +13,8 @@ import type { FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/auth-provider';
-import { Button, Card, Notice, PageHeading, SelectField, TextField } from '@/components/ui';
+import { Button, Notice, SelectField, TextField } from '@/components/ui';
+import { AuthShell } from '@/components/auth-shell';
 import { messageForError } from '@/lib/errors';
 import { homePathFor } from '@/lib/routes';
 import type { Role } from '@/lib/types';
@@ -56,82 +57,90 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="mx-auto max-w-sm space-y-4">
-      <PageHeading
-        title="Create an account"
-        description="Passengers request rides; drivers drive."
-      />
+    <AuthShell
+      title="Create an account"
+      subtitle="Passengers request a seat; drivers bring a Tesla online."
+    >
+      <form className="mt-6 space-y-4" onSubmit={handleSubmit} noValidate>
+        <TextField
+          label="Name"
+          name="name"
+          autoComplete="name"
+          required
+          value={name}
+          disabled={pending}
+          onChange={(event) => setName(event.target.value)}
+        />
+        <TextField
+          label="Email"
+          name="email"
+          type="email"
+          autoComplete="email"
+          required
+          value={email}
+          disabled={pending}
+          onChange={(event) => setEmail(event.target.value)}
+        />
+        <TextField
+          label="Password"
+          name="password"
+          type="password"
+          autoComplete="new-password"
+          required
+          hint={`At least ${MIN_PASSWORD_LENGTH} characters.`}
+          value={password}
+          disabled={pending}
+          onChange={(event) => setPassword(event.target.value)}
+        />
+        <SelectField
+          label="I am a"
+          name="role"
+          value={role}
+          disabled={pending}
+          onChange={(event) => setRole(event.target.value as Role)}
+        >
+          <option value="PASSENGER">Passenger — I want a seat</option>
+          <option value="DRIVER">Driver — I have a Tesla</option>
+        </SelectField>
 
-      <Card>
-        <form className="space-y-4" onSubmit={handleSubmit} noValidate>
-          <TextField
-            label="Name"
-            name="name"
-            autoComplete="name"
-            required
-            value={name}
-            disabled={pending}
-            onChange={(event) => setName(event.target.value)}
-          />
-          <TextField
-            label="Email"
-            name="email"
-            type="email"
-            autoComplete="email"
-            required
-            value={email}
-            disabled={pending}
-            onChange={(event) => setEmail(event.target.value)}
-          />
-          <TextField
-            label="Password"
-            name="password"
-            type="password"
-            autoComplete="new-password"
-            required
-            hint={`At least ${MIN_PASSWORD_LENGTH} characters.`}
-            value={password}
-            disabled={pending}
-            onChange={(event) => setPassword(event.target.value)}
-          />
-          <SelectField
-            label="I am a"
-            name="role"
-            value={role}
-            disabled={pending}
-            onChange={(event) => setRole(event.target.value as Role)}
+        {error !== null && (
+          <p
+            role="alert"
+            className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800"
           >
-            <option value="PASSENGER">Passenger</option>
-            <option value="DRIVER">Driver</option>
-          </SelectField>
-
-          {error !== null && (
-            <p
-              role="alert"
-              className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+            <svg
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              className="mt-0.5 h-4 w-4 shrink-0"
+              aria-hidden
             >
-              {error}
-            </p>
-          )}
+              <path
+                fillRule="evenodd"
+                d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm.75-11.5a.75.75 0 0 0-1.5 0v4a.75.75 0 0 0 1.5 0v-4ZM10 14a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z"
+                clipRule="evenodd"
+              />
+            </svg>
+            {error}
+          </p>
+        )}
 
-          <Button type="submit" pending={pending} className="w-full">
-            Create account
-          </Button>
-        </form>
-      </Card>
+        <Button type="submit" pending={pending} className="w-full py-2.5">
+          Create account
+        </Button>
+      </form>
 
       <Notice>
-        A driver account alone cannot create a ride: phase 5 adds the Tesla registry and the online
-        toggle those pools need.
+        Drivers register their Teslas from the dashboard and take a car online before passengers can
+        request a ride on their corridor.
       </Notice>
 
-      <p className="text-sm text-slate-600">
+      <p className="mt-6 text-sm text-ink-500">
         Already registered?{' '}
-        <Link className="font-medium text-emerald-700" href="/login">
+        <Link className="font-semibold text-brand-700 hover:underline" href="/login">
           Sign in
         </Link>
         .
       </p>
-    </div>
+    </AuthShell>
   );
 }

@@ -29,49 +29,57 @@ export function StatusTimeline({
   const cancelledAt = timeline.find((entry) => entry.toStatus === 'CANCELLED')?.createdAt;
 
   return (
-    <ol className="space-y-0" data-ride-status={status}>
+    <ol className="relative space-y-0" data-ride-status={status}>
+      {/* One continuous rail behind the dots: the ladder reads as a single path. */}
+      <span aria-hidden className="absolute left-[5px] top-2 bottom-6 w-px bg-ink-900/10" />
       {RIDE_PROGRESSION.map((step, index) => {
         const reached = !cancelled && currentIndex >= index;
         const current = !cancelled && currentIndex === index;
         const at = timeline.find((entry) => entry.toStatus === step)?.createdAt;
 
         return (
-          <li key={step} className="flex gap-3">
+          <li key={step} className="relative flex gap-3.5">
             <span
               aria-hidden
-              className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${
-                reached ? 'bg-emerald-600' : 'bg-slate-300'
-              } ${current ? 'ring-4 ring-emerald-100' : ''}`}
+              className={`relative z-10 mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ring-4 ring-white ${
+                reached ? 'bg-brand-600' : 'bg-ink-900/15'
+              } ${current ? 'ring-brand-100' : ''}`}
             />
-            <div className="pb-4">
+            <div className="pb-5 last:pb-0">
               <p
                 aria-current={current ? 'step' : undefined}
-                className={
-                  reached ? 'text-sm font-medium text-slate-900' : 'text-sm text-slate-500'
-                }
+                className={reached ? 'text-sm font-semibold text-ink-900' : 'text-sm text-ink-400'}
               >
                 {statusLabel(step)}
-                {current && <span className="ml-2 text-xs font-normal text-emerald-700">now</span>}
+                {current && (
+                  <span className="ml-2 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-semibold text-brand-700">
+                    now
+                  </span>
+                )}
               </p>
-              {at !== undefined && <p className="text-xs text-slate-500">{formatDateTime(at)}</p>}
+              {at !== undefined && (
+                <p className="mt-0.5 text-xs text-ink-500">{formatDateTime(at)}</p>
+              )}
             </div>
           </li>
         );
       })}
 
       {cancelled && (
-        <li className="flex gap-3" data-status="CANCELLED">
+        <li className="relative flex gap-3.5" data-status="CANCELLED">
           <span
             aria-hidden
-            className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-slate-400 ring-4 ring-slate-100"
+            className="relative z-10 mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-ink-400 ring-4 ring-ink-100"
           />
           <div>
-            <p aria-current="step" className="text-sm font-medium text-slate-900">
+            <p aria-current="step" className="text-sm font-semibold text-ink-900">
               {statusLabel('CANCELLED')}
-              <span className="ml-2 text-xs font-normal text-slate-600">now</span>
+              <span className="ml-2 rounded-full bg-ink-100 px-2 py-0.5 text-[11px] font-semibold text-ink-600">
+                now
+              </span>
             </p>
             {cancelledAt !== undefined && (
-              <p className="text-xs text-slate-500">{formatDateTime(cancelledAt)}</p>
+              <p className="mt-0.5 text-xs text-ink-500">{formatDateTime(cancelledAt)}</p>
             )}
           </div>
         </li>

@@ -15,7 +15,7 @@
 
 import { API_BASE } from './env';
 import { ApiError, NetworkError } from './errors';
-import { clearRoleCookie } from './cookies';
+import { clearRoleCookie, clearSessionHint, setSessionHint } from './cookies';
 import { clearAccessToken, getAccessToken, setAccessToken } from './token-store';
 import type {
   ApiEnvelope,
@@ -51,8 +51,27 @@ interface CallResult<T> {
   meta?: { page: number; limit: number; total: number };
 }
 
+/**
+ * The outcome of a session restore.
+ *
+ * `throttled` exists because `429` is **not** an authentication failure. A page
+ * reload legitimately calls `/auth/refresh`, so a burst of reloads can hit the
+ * limiter while the `httpOnly` cookie is still perfectly valid. Treating that as
+ * a sign-out cleared the session and threw the user back to `/login` — losing a
+ * session that was never lost. The limiter stays on; the client just has to tell
+ * "wait a moment" apart from "sign in again".
+ */
+export type RefreshOutcome = 'restored' | 'anonymous' | 'throttled';
+
 /** Single-flight refresh — all racing 401s await the same rotation. */
-let refreshInFlight: Promise<boolean> | null = null;
+let refreshInFlight: Promise<RefreshOutcome> | null = null;
+
+/** Every real sign-out clears the same three things: token, role, session hint. */
+function dropSession(): void {
+  clearAccessToken();
+  clearRoleCookie();
+  clearSessionHint();
+}
 
 async function parseBody(response: Response): Promise<unknown> {
   if (response.status === 204) return undefined;
@@ -67,11 +86,11 @@ async function parseBody(response: Response): Promise<unknown> {
 }
 
 /**
- * `POST /auth/refresh` — the one call that may run without a token. Returns
- * whether a new access token was obtained; on failure the session is cleared so
- * the guards send the user to `/login`.
+ * `POST /auth/refresh` — the one call that may run without a token. Reports
+ * whether the session was restored, was genuinely absent, or is merely throttled;
+ * only the middle case clears the session (see `RefreshOutcome`).
  */
-export async function refreshAccessToken(): Promise<boolean> {
+export function refreshAccessToken(): Promise<RefreshOutcome> {
   refreshInFlight ??= (async () => {
     try {
       const response = await fetch(`${API_BASE}/auth/refresh`, {
@@ -80,18 +99,22 @@ export async function refreshAccessToken(): Promise<boolean> {
         headers: { Accept: 'application/json' },
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
+      if (response.status === 429) {
+        // Keep the hint: the cookie is still there, we were merely too fast.
+        return 'throttled' as const;
+      }
       if (!response.ok) {
-        clearAccessToken();
-        clearRoleCookie();
-        return false;
+        dropSession();
+        return 'anonymous' as const;
       }
       const envelope = (await parseBody(response)) as ApiEnvelope<{ accessToken: string }>;
       setAccessToken(envelope.data.accessToken);
-      return true;
+      setSessionHint();
+      return 'restored' as const;
     } catch {
-      clearAccessToken();
-      clearRoleCookie();
-      return false;
+      // A network failure is not proof the session ended; keep the hint so the
+      // next load tries again instead of stranding the user at `/login`.
+      return 'throttled' as const;
     } finally {
       refreshInFlight = null;
     }
@@ -129,13 +152,16 @@ async function call<T>(path: string, options: CallOptions = {}): Promise<CallRes
 
   // Expired access token → refresh once → retry once. A second 401 is a real sign-out.
   if (response.status === 401 && authenticated) {
-    const refreshed = await refreshAccessToken();
-    if (refreshed) {
+    const outcome = await refreshAccessToken();
+    if (outcome === 'restored') {
       try {
         response = await send();
       } catch {
         throw new NetworkError();
       }
+    } else if (outcome === 'throttled') {
+      // Say "wait", never "sign in again": the session is fine, we were throttled.
+      throw new ApiError(429, undefined, 'Too many attempts. Please wait a moment and try again.');
     } else {
       const rejected = (await parseBody(response).catch(() => undefined)) as
         ApiErrorBody | undefined;
@@ -169,6 +195,7 @@ export async function login(email: string, password: string): Promise<UserProfil
     authenticated: false,
   });
   setAccessToken(data.accessToken);
+  setSessionHint();
   return data.user;
 }
 
@@ -194,8 +221,7 @@ export async function logout(): Promise<void> {
   try {
     await call<void>('/auth/logout', { method: 'POST', authenticated: false });
   } finally {
-    clearAccessToken();
-    clearRoleCookie();
+    dropSession();
   }
 }
 

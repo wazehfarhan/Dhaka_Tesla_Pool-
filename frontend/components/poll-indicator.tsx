@@ -15,11 +15,11 @@ export function PollIndicator({
     <p
       aria-live="polite"
       data-poll-state={failed ? 'failed' : 'ok'}
-      className={`inline-flex items-center gap-2 text-xs ${failed ? 'text-amber-700' : 'text-slate-500'}`}
+      className={`inline-flex items-center gap-2 rounded-full border border-ink-900/5 bg-white/70 px-2.5 py-1 text-xs font-medium ${failed ? 'text-amber-700' : 'text-ink-500'}`}
     >
       <span
         aria-hidden
-        className={`h-2 w-2 rounded-full ${failed ? 'bg-amber-500' : 'bg-emerald-500'}`}
+        className={`h-1.5 w-1.5 rounded-full ${failed ? 'bg-amber-500' : 'bg-brand-500'}`}
       />
       {failed ? 'reconnecting · showing the last update' : label}
     </p>

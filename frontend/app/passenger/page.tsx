@@ -17,10 +17,14 @@ import { useAuth } from '@/components/auth-provider';
 import {
   Button,
   Card,
+  DataList,
+  DataRow,
   EmptyState,
   ErrorBanner,
   PageHeading,
+  RouteLine,
   Skeleton,
+  Stat,
   StatusChip,
 } from '@/components/ui';
 import { usePolling } from '@/hooks/use-polling';
@@ -76,6 +80,7 @@ export default function PassengerDashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeading
+        eyebrow="Passenger"
         title={`Hello, ${user?.name ?? 'passenger'}`}
         description="One Tesla, three seats. Your ride, your seat, your fare."
         actions={
@@ -90,14 +95,23 @@ export default function PassengerDashboardPage() {
 
       {state.error !== null && <ErrorBanner message={state.error} onRetry={refresh} />}
 
-      <div className="grid gap-6 md:grid-cols-2">
-        <CurrentRideColumn loading={loading} activeRide={activeRide} />
-        <RecentRidesColumn
-          loading={loading}
-          rides={recentRides}
-          total={state.total}
-          hasActive={activeRide !== null}
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Stat
+          label="Active ride"
+          value={activeRide === null ? 'None' : statusLabel(activeRide.status)}
+          tone={activeRide === null ? 'plain' : 'brand'}
         />
+        <Stat
+          label="Seats held"
+          value={activeRide === null ? '—' : seatsLabel(activeRide.seats)}
+          hint={activeRide === null ? 'Request a ride to hold seats' : 'Released if you cancel'}
+        />
+        <Stat label="Rides so far" value={state.total} hint="Completed and cancelled" />
+      </div>
+
+      <div className="grid items-start gap-6 md:grid-cols-2">
+        <CurrentRideColumn loading={loading} activeRide={activeRide} />
+        <RecentRidesColumn loading={loading} rides={recentRides} hasActive={activeRide !== null} />
       </div>
     </div>
   );
@@ -113,8 +127,6 @@ function CurrentRideColumn({
 }) {
   return (
     <div className="space-y-3">
-      <h2 className="text-sm font-medium text-slate-600">Current ride</h2>
-
       {loading && (
         <Card>
           <div className="space-y-3" aria-busy="true">
@@ -139,38 +151,32 @@ function CurrentRideColumn({
       {!loading && activeRide !== null && (
         <Card
           title="Current ride"
+          tone="accent"
           actions={<StatusChip status={activeRide.status} label={statusLabel(activeRide.status)} />}
         >
-          <p aria-live="polite" className="text-sm text-slate-700">
+          <p aria-live="polite" className="text-sm leading-relaxed text-ink-600">
             {statusDetail(activeRide.status)}
           </p>
 
-          <dl className="mt-3 space-y-1 text-sm">
-            <div className="flex justify-between gap-3">
-              <dt className="text-slate-600">Route</dt>
-              <dd className="font-medium">
-                {activeRide.pickupZone} → {activeRide.destinationZone}
-              </dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-slate-600">Seats held</dt>
-              <dd className="font-medium">{seatsLabel(activeRide.seats)}</dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-slate-600">Fare</dt>
-              <dd className="font-medium" data-poisha={activeRide.fare?.totalPoisha ?? 0}>
-                {activeRide.fare === null ? '—' : formatBdt(activeRide.fare.totalPoisha)}
-              </dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-slate-600">Requested</dt>
-              <dd className="text-slate-700">{formatDateTime(activeRide.createdAt)}</dd>
-            </div>
-          </dl>
+          <p className="mt-3 text-xl font-bold tracking-tight text-ink-900">
+            <RouteLine from={activeRide.pickupZone} to={activeRide.destinationZone} />
+          </p>
+
+          <div className="mt-4">
+            <DataList>
+              <DataRow label="Seats held">{seatsLabel(activeRide.seats)}</DataRow>
+              <DataRow label="Fare">
+                <span data-poisha={activeRide.fare?.totalPoisha ?? 0}>
+                  {activeRide.fare === null ? '—' : formatBdt(activeRide.fare.totalPoisha)}
+                </span>
+              </DataRow>
+              <DataRow label="Requested">{formatDateTime(activeRide.createdAt)}</DataRow>
+            </DataList>
+          </div>
 
           <div className="mt-4">
             <Link href={`/passenger/rides/${activeRide.id}`}>
-              <Button variant="secondary">Open ride</Button>
+              <Button className="w-full">Open ride</Button>
             </Link>
           </div>
         </Card>
@@ -183,18 +189,14 @@ function CurrentRideColumn({
 function RecentRidesColumn({
   loading,
   rides,
-  total,
   hasActive,
 }: {
   loading: boolean;
   rides: RideListItem[];
-  total: number;
   hasActive: boolean;
 }) {
   return (
     <div className="space-y-3">
-      <h2 className="text-sm font-medium text-slate-600">Recent rides</h2>
-
       {loading && (
         <Card>
           <div className="space-y-2" aria-busy="true">
@@ -206,28 +208,41 @@ function RecentRidesColumn({
       )}
 
       {!loading && rides.length === 0 && (
-        <Card>
-          <p className="text-sm text-slate-600">
+        <Card title="Recent rides">
+          <p className="text-sm leading-relaxed text-ink-500">
             {hasActive
-              ? 'That is your only ride so far.'
-              : 'Nothing yet — your first request will show up here.'}
+              ? 'That is your only ride so far. Finished trips and their fares will collect here.'
+              : 'Nothing yet — your first request will show up here with its status and fare.'}
           </p>
         </Card>
       )}
 
       {!loading && rides.length > 0 && (
-        <Card>
-          <ul className="divide-y divide-slate-100 text-sm">
+        <Card
+          title="Recent rides"
+          actions={
+            <Link
+              className="text-sm font-semibold text-brand-700 hover:underline"
+              href="/passenger/rides"
+            >
+              See all
+            </Link>
+          }
+        >
+          <ul className="divide-y divide-ink-900/5 text-sm">
             {rides.map((ride) => (
-              <li key={ride.id} className="flex items-center justify-between gap-3 py-2">
+              <li
+                key={ride.id}
+                className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
+              >
                 <div>
                   <Link
-                    className="font-medium text-emerald-700 hover:underline"
+                    className="font-semibold text-ink-900 hover:text-brand-700"
                     href={`/passenger/rides/${ride.id}`}
                   >
-                    {ride.pickupZone} → {ride.destinationZone}
+                    <RouteLine from={ride.pickupZone} to={ride.destinationZone} />
                   </Link>
-                  <p className="text-xs text-slate-500">
+                  <p className="mt-0.5 text-xs text-ink-500">
                     {formatDateTime(ride.createdAt)} · {seatsLabel(ride.seats)}
                   </p>
                 </div>
@@ -235,13 +250,6 @@ function RecentRidesColumn({
               </li>
             ))}
           </ul>
-
-          <p className="mt-3 text-xs text-slate-500">
-            {total} ride{total === 1 ? '' : 's'} total ·{' '}
-            <Link className="text-emerald-700" href="/passenger/rides">
-              See all
-            </Link>
-          </p>
         </Card>
       )}
     </div>

@@ -141,6 +141,7 @@ export default function DriverPoolPage() {
         <>
           <Card
             title="Trip"
+            tone="accent"
             actions={<StatusChip status={pool.status} label={poolStatusLabel(pool.status)} />}
           >
             <DataList>
@@ -158,7 +159,7 @@ export default function DriverPoolPage() {
 
             <div className="mt-4 flex flex-wrap items-center gap-3">
               {next === null ? (
-                <p className="text-sm text-slate-600">
+                <p className="text-sm text-ink-500">
                   This trip is finished — nothing left to drive.
                 </p>
               ) : (
@@ -172,7 +173,7 @@ export default function DriverPoolPage() {
                   variant="danger"
                   pending={busy !== null}
                   onClick={() => act('cancel')}
-                  title="Cancels the pool and every active ride (api.md §6.5)"
+                  title="Cancels the pool and every active ride on it"
                 >
                   Cancel trip
                 </Button>
@@ -180,27 +181,25 @@ export default function DriverPoolPage() {
             </div>
 
             {pool.status === 'STARTED' && (
-              <Notice tone="warn">
-                The trip has started, so cancelling is no longer offered (PRD §14).
-              </Notice>
+              <Notice tone="warn">The trip has started, so cancelling is no longer offered.</Notice>
             )}
           </Card>
 
           <Card
             title="Passengers"
-            subtitle="Each fare is individual — the pool discount applies from two completers (PRD §12)."
+            subtitle="Every passenger has their own fare. The pool discount applies once two or more complete the trip."
           >
-            <ul className="divide-y divide-slate-100 text-sm">
+            <ul className="divide-y divide-ink-900/5 text-sm">
               {pool.members.map((member) => (
-                <li key={member.rideId} className="py-3">
+                <li key={member.rideId} className="py-3.5 first:pt-0 last:pb-0">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="font-medium text-slate-900">{member.passenger}</span>
+                    <span className="font-semibold text-ink-900">{member.passenger}</span>
                     <span className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500">{seatsLabel(member.seats)}</span>
+                      <span className="text-xs text-ink-500">{seatsLabel(member.seats)}</span>
                       <StatusChip status={member.status} label={statusLabel(member.status)} />
                     </span>
                   </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-slate-600">
+                  <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-ink-500">
                     <span>
                       Fare{' '}
                       {member.fare === null ? (
@@ -208,9 +207,7 @@ export default function DriverPoolPage() {
                       ) : (
                         <span data-poisha={member.fare.totalPoisha}>
                           {formatBdt(member.fare.totalPoisha)}{' '}
-                          <span className="text-slate-400">
-                            ({member.fare.status.toLowerCase()})
-                          </span>
+                          <span className="text-ink-400">({member.fare.status.toLowerCase()})</span>
                         </span>
                       )}
                     </span>
@@ -226,23 +223,40 @@ export default function DriverPoolPage() {
             </ul>
           </Card>
 
-          <Card title="Timeline" subtitle="Every transition is recorded (database.md §3.7).">
-            <ol className="space-y-2 text-sm">
+          <Card
+            title="Timeline"
+            subtitle="Every status change the pool went through, as it happened."
+          >
+            <ol className="relative space-y-0 text-sm">
+              {/* Same continuous-rail treatment as the passenger timeline. */}
+              <span aria-hidden className="absolute left-[5px] top-2 bottom-4 w-px bg-ink-900/10" />
               {pool.timeline.map((entry, index) => (
-                <li key={`${entry.toStatus}-${index}`} className="flex flex-wrap gap-2">
-                  <span className="text-slate-500">{formatDateTime(entry.createdAt)}</span>
-                  <span className="font-medium text-slate-900">
+                <li
+                  key={`${entry.toStatus}-${index}`}
+                  className="relative flex flex-wrap items-baseline gap-x-2 gap-y-0.5 pb-4 last:pb-0"
+                >
+                  <span
+                    aria-hidden
+                    className="relative z-10 mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-brand-600 ring-4 ring-white"
+                  />
+                  <span className="text-xs text-ink-500">{formatDateTime(entry.createdAt)}</span>
+                  <span className="font-semibold text-ink-900">
                     {entry.fromStatus ?? 'new'} → {entry.toStatus}
                   </span>
                   {entry.reason !== null && (
-                    <span className="font-mono text-xs text-slate-500">{entry.reason}</span>
+                    <span className="rounded bg-ink-100 px-1.5 py-0.5 font-mono text-[11px] text-ink-600">
+                      {entry.reason}
+                    </span>
                   )}
                 </li>
               ))}
             </ol>
           </Card>
 
-          <Link href="/driver" className="inline-block text-sm text-emerald-700 hover:underline">
+          <Link
+            href="/driver"
+            className="inline-block text-sm font-semibold text-brand-700 hover:underline"
+          >
             Back to dashboard
           </Link>
         </>

@@ -16,7 +16,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/components/auth-provider';
-import { Button } from '@/components/ui';
+import { BrandMark, Button } from '@/components/ui';
 
 interface NavItem {
   href: string;
@@ -35,17 +35,14 @@ const DRIVER_NAV: NavItem[] = [
 ];
 
 export function AppHeader() {
-  const { status, user, signOut } = useAuth();
+  const { status, user, restoring, signOut } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
   const [signingOut, setSigningOut] = useState(false);
 
-  const nav =
-    status === 'authenticated' && user !== null
-      ? user.role === 'DRIVER'
-        ? DRIVER_NAV
-        : PASSENGER_NAV
-      : [];
+  const authenticated = status === 'authenticated' && user !== null;
+
+  const nav = authenticated ? (user.role === 'DRIVER' ? DRIVER_NAV : PASSENGER_NAV) : [];
 
   async function handleSignOut() {
     setSigningOut(true);
@@ -55,13 +52,21 @@ export function AppHeader() {
   }
 
   return (
-    <header className="border-b border-slate-200 bg-white">
-      <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-        <Link href="/" className="font-semibold text-slate-900">
-          Dhaka Tesla Pool
+    <header className="sticky top-0 z-30 border-b border-ink-900/5 bg-white/80 backdrop-blur-md">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3 sm:px-6">
+        <Link href="/" className="flex items-center gap-2.5">
+          <BrandMark />
+          <span className="flex flex-col leading-none">
+            <span className="text-[15px] font-bold tracking-tight text-ink-900">
+              Dhaka Tesla Pool
+            </span>
+            <span className="mt-0.5 text-[11px] font-medium text-ink-500">
+              Shared rides, one Tesla
+            </span>
+          </span>
         </Link>
 
-        <nav aria-label="Main" className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        <nav aria-label="Main" className="flex flex-wrap items-center gap-1 text-sm">
           {nav.map((item) => {
             const active = pathname === item.href;
             return (
@@ -69,9 +74,11 @@ export function AppHeader() {
                 key={item.href}
                 href={item.href}
                 aria-current={active ? 'page' : undefined}
-                className={
-                  active ? 'font-medium text-emerald-700' : 'text-slate-600 hover:text-slate-900'
-                }
+                className={`rounded-lg px-3 py-1.5 font-medium transition-colors ${
+                  active
+                    ? 'bg-brand-50 text-brand-800'
+                    : 'text-ink-600 hover:bg-ink-900/5 hover:text-ink-900'
+                }`}
               >
                 {item.label}
               </Link>
@@ -80,23 +87,40 @@ export function AppHeader() {
         </nav>
 
         <div className="ml-auto flex items-center gap-3 text-sm">
-          {status === 'authenticated' && user !== null ? (
+          {authenticated && user !== null ? (
             <>
-              <span className="text-slate-600" data-role={user.role}>
-                {user.name}
+              <span
+                className="hidden items-center gap-2 rounded-full border border-ink-900/5 bg-ink-50 py-1 pl-1 pr-3 sm:flex"
+                data-role={user.role}
+              >
+                <span
+                  aria-hidden
+                  className="grid h-6 w-6 place-items-center rounded-full bg-gradient-to-br from-brand-400 to-brand-700 text-[11px] font-bold text-white"
+                >
+                  {user.name.slice(0, 1).toUpperCase()}
+                </span>
+                <span className="font-semibold text-ink-800">{user.name}</span>
+                <span className="text-xs font-medium text-ink-500">
+                  {user.role === 'DRIVER' ? 'Driver' : 'Passenger'}
+                </span>
               </span>
               <Button variant="secondary" onClick={handleSignOut} pending={signingOut}>
                 Sign out
               </Button>
             </>
+          ) : restoring ? (
+            <span className="text-xs font-medium text-amber-700">Restoring session…</span>
           ) : (
             status === 'guest' && (
               <>
-                <Link className="text-slate-600 hover:text-slate-900" href="/login">
+                <Link
+                  className="rounded-lg px-3 py-1.5 font-medium text-ink-600 hover:bg-ink-900/5 hover:text-ink-900"
+                  href="/login"
+                >
                   Sign in
                 </Link>
-                <Link className="text-slate-600 hover:text-slate-900" href="/register">
-                  Register
+                <Link href="/register">
+                  <Button className="py-2">Get started</Button>
                 </Link>
               </>
             )

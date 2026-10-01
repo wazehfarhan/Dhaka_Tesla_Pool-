@@ -18,7 +18,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from 'react';
 import * as api from '@/lib/api';
 import type { RegisterInput } from '@/lib/api';
-import { clearRoleCookie, setRoleCookie } from '@/lib/cookies';
+import { clearRoleCookie, hasSessionHint, setRoleCookie } from '@/lib/cookies';
 import { messageForError } from '@/lib/errors';
 import { getAccessToken, subscribeToToken } from '@/lib/token-store';
 import type { UserProfile } from '@/lib/types';
@@ -28,6 +28,14 @@ export type AuthStatus = 'loading' | 'authenticated' | 'guest';
 export interface AuthContextValue {
   status: AuthStatus;
   user: UserProfile | null;
+  /**
+   * True when the session could not be restored *yet* because the API throttled
+   * us (or was unreachable). Distinct from `guest`: the user is still signed in
+   * as far as anyone knows, so the shell shows a retry instead of bouncing them
+   * to `/login`.
+   */
+  restoring: boolean;
+  retryRestore: () => void;
   signIn: (email: string, password: string) => Promise<UserProfile>;
   signUp: (input: RegisterInput) => Promise<UserProfile>;
   signOut: () => Promise<void>;
@@ -35,30 +43,54 @@ export interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+/** How long to wait before re-asking after a throttle; the window is 60 s. */
+const RESTORE_RETRY_MS = 5_000;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading');
   const [user, setUser] = useState<UserProfile | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   const applyProfile = useCallback((profile: UserProfile) => {
     setUser(profile);
     setRoleCookie(profile.role);
+    setRestoring(false);
     setStatus('authenticated');
   }, []);
 
   const forgetSession = useCallback(() => {
     setUser(null);
     clearRoleCookie();
+    setRestoring(false);
     setStatus('guest');
   }, []);
 
+  const retryRestore = useCallback(() => setAttempt((n) => n + 1), []);
+
   // Restore the session once per page load: refresh (cookie) → me (profile).
+  //
+  // The `dtp_session` hint (lib/cookies.ts) is checked first: without it there is
+  // provably no cookie worth asking about, so a guest gets `guest` immediately
+  // instead of a doomed `POST /auth/refresh` on every page view.
   useEffect(() => {
     let cancelled = false;
 
+    if (!hasSessionHint() && getAccessToken() === null) {
+      setStatus('guest');
+      return;
+    }
+
     void (async () => {
-      const hasToken = getAccessToken() !== null || (await api.refreshAccessToken());
+      const outcome = await api.refreshAccessToken();
       if (cancelled) return;
-      if (!hasToken) {
+      if (outcome === 'anonymous') {
+        setStatus('guest');
+        return;
+      }
+      if (outcome === 'throttled') {
+        // Keep the session: the cookie is intact, the API is just busy saying no.
+        setRestoring(true);
         setStatus('guest');
         return;
       }
@@ -74,7 +106,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [applyProfile, forgetSession]);
+  }, [applyProfile, forgetSession, attempt]);
+
+  // A throttled restore is temporary by definition, so try again on a timer.
+  useEffect(() => {
+    if (!restoring) return;
+    const timer = setTimeout(retryRestore, RESTORE_RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [restoring, retryRestore, attempt]);
 
   // Any later 401 that refresh cannot fix clears the token; reflect that immediately.
   useEffect(
@@ -109,8 +148,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [forgetSession]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ status, user, signIn, signUp, signOut }),
-    [status, user, signIn, signUp, signOut],
+    () => ({ status, user, restoring, retryRestore, signIn, signUp, signOut }),
+    [status, user, restoring, retryRestore, signIn, signUp, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

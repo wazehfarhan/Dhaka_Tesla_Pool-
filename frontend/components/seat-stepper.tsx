@@ -27,12 +27,12 @@ export function SeatStepper({
 
   return (
     <div className="text-sm">
-      <span className="block text-slate-700" id="seats-label">
+      <span className="block font-medium text-ink-700" id="seats-label">
         Seats
       </span>
 
       <div
-        className="mt-1 inline-flex items-center gap-2"
+        className="mt-1.5 inline-flex items-center gap-1 rounded-2xl border border-ink-900/10 bg-white p-1 shadow-xs"
         role="group"
         aria-labelledby="seats-label"
         data-seats={seats}
@@ -40,20 +40,22 @@ export function SeatStepper({
       >
         <Button
           type="button"
-          variant="secondary"
+          variant="ghost"
           aria-label="Remove one seat"
+          className="h-9 w-9 rounded-xl px-0 text-lg"
           disabled={disabled || atMin}
           onClick={() => onChange(seats - 1)}
         >
           −
         </Button>
-        <output className="min-w-8 text-center text-base font-medium text-slate-900">
+        <output className="min-w-10 text-center text-lg font-bold tracking-tight text-ink-900">
           {seats}
         </output>
         <Button
           type="button"
-          variant="secondary"
+          variant="ghost"
           aria-label="Add one seat"
+          className="h-9 w-9 rounded-xl px-0 text-lg"
           disabled={disabled || atMax}
           onClick={() => onChange(seats + 1)}
         >
@@ -61,14 +63,14 @@ export function SeatStepper({
         </Button>
       </div>
 
-      <p className="mt-1 text-xs text-slate-500">
+      <p className="mt-2 text-xs text-ink-500">
         {maxSeats} of {seatCapacity} seats left on this route
         {atMax && maxSeats > 0 ? ' — that is the most one passenger can hold.' : '.'}
       </p>
 
       {maxSeats === 0 && (
-        <p className="mt-1 text-xs text-amber-700">
-          Bullet is full on this route, so seats cannot be added.
+        <p className="mt-1 text-xs font-medium text-amber-700">
+          This route is full, so no more seats can be added.
         </p>
       )}
     </div>

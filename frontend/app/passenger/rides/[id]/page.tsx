@@ -30,6 +30,7 @@ import {
   ErrorBanner,
   Notice,
   PageHeading,
+  RouteLine,
   Skeleton,
   StatusChip,
 } from '@/components/ui';
@@ -188,13 +189,18 @@ function RideDetailBody({
     <>
       <Card
         title={statusLabel(ride.status)}
+        tone="accent"
         actions={<StatusChip status={ride.status} label={statusLabel(ride.status)} />}
       >
-        <p aria-live="polite" className="text-sm text-slate-700">
+        <p aria-live="polite" className="text-sm leading-relaxed text-ink-600">
           {statusDetail(ride.status)}
         </p>
 
-        <div className="mt-3">
+        <p className="mt-3 text-xl font-bold tracking-tight text-ink-900">
+          <RouteLine from={ride.pickupZone} to={ride.destinationZone} />
+        </p>
+
+        <div className="mt-4">
           <DataList>
             <DataRow label="Seats held">{seatsLabel(ride.seats)}</DataRow>
             <DataRow label="Distance">
@@ -207,13 +213,13 @@ function RideDetailBody({
               </span>
             </DataRow>
             <DataRow label="Ride id">
-              <span className="font-mono text-xs text-slate-600">{ride.id}</span>
+              <span className="font-mono text-xs font-normal text-ink-500">{ride.id}</span>
             </DataRow>
           </DataList>
         </div>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid items-start gap-4 md:grid-cols-2">
         <Card title="Status">
           <StatusTimeline status={ride.status} timeline={ride.timeline} />
         </Card>
@@ -221,7 +227,7 @@ function RideDetailBody({
         <div className="space-y-4">
           <Card title="Fare">
             {ride.fare === null ? (
-              <p className="text-sm text-slate-600">The fare has not been recorded yet.</p>
+              <p className="text-sm text-ink-600">The fare has not been recorded yet.</p>
             ) : (
               <FareBreakdown fare={ride.fare} distanceKm={ride.distanceKm} />
             )}
@@ -229,7 +235,7 @@ function RideDetailBody({
 
           <Card title="Payment">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-sm text-slate-700">
+              <p className="text-sm text-ink-700">
                 {ride.payment === null
                   ? 'No payment yet — one is created when the trip completes.'
                   : ride.payment.status === 'PAID'
@@ -259,7 +265,7 @@ function RideDetailBody({
                 onClick={onPay}
                 title={
                   payable
-                    ? 'Marks the payment PAID — simulated, no real gateway (api.md §8)'
+                    ? 'Marks the payment paid — simulated, no real gateway is called'
                     : 'Payment opens once the trip has completed'
                 }
               >
@@ -268,7 +274,7 @@ function RideDetailBody({
             </div>
 
             {!completed && (
-              <p className="mt-3 text-xs text-slate-500">
+              <p className="mt-3 text-xs text-ink-500">
                 Payment opens once the pool completes — a final fare only exists then.
               </p>
             )}
@@ -277,7 +283,7 @@ function RideDetailBody({
           {cancellable && (
             <Card
               title="Cancel"
-              subtitle="Freeing your seat immediately — the driver is notified by the status change (PRD §14)."
+              subtitle="Frees your seat straight away. The driver sees the change on their dashboard."
             >
               <div className="flex flex-wrap items-center gap-3">
                 <Button
@@ -288,7 +294,7 @@ function RideDetailBody({
                 >
                   Cancel ride
                 </Button>
-                <span className="text-xs text-slate-500">
+                <span className="text-xs text-ink-500">
                   Only possible before the driver starts the trip.
                 </span>
               </div>
@@ -296,9 +302,7 @@ function RideDetailBody({
           )}
 
           {ride.status === 'STARTED' && (
-            <Notice tone="warn">
-              The trip has started, so cancellation is no longer offered (ui-ux §3).
-            </Notice>
+            <Notice tone="warn">The trip has started, so cancelling is no longer offered.</Notice>
           )}
         </div>
       </div>

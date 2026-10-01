@@ -72,11 +72,11 @@ export default function RequestRidePage() {
   }, [intent]);
 
   // The API is the authority on how many seats are left: never sit above it.
-  useEffect(() => {
-    if (estimate === null) return;
-    const ceiling = Math.max(estimate.poolAvailableSeats, 1);
-    setSeats((current) => Math.min(Math.max(current, 1), ceiling));
-  }, [estimate]);
+  // Derived during render rather than synced in an effect, so a shrinking pool
+  // can never leave a stale, over-capacity seat count on screen for a frame.
+  const ceiling =
+    estimate === null ? ASSUMED_SEAT_CAPACITY : Math.max(estimate.poolAvailableSeats, 1);
+  const requestedSeats = Math.min(Math.max(seats, 1), ceiling);
 
   const handleEstimateRetry = useCallback(() => reloadEstimate(), [reloadEstimate]);
 
@@ -104,7 +104,7 @@ export default function RequestRidePage() {
       const { ride, replayed: wasReplay } = await createRide({
         pickupZone: pickup,
         destinationZone: destination,
-        seats,
+        seats: requestedSeats,
         clientRequestId: requestIdRef.current,
       });
       setReplayed(wasReplay);
@@ -155,8 +155,8 @@ export default function RequestRidePage() {
                   disabled={pending}
                 />
                 <SeatStepper
-                  seats={seats}
-                  maxSeats={estimate === null ? ASSUMED_SEAT_CAPACITY : availableSeats}
+                  seats={requestedSeats}
+                  maxSeats={ceiling}
                   seatCapacity={seatCapacity}
                   onChange={setSeats}
                   disabled={pending || estimate === null}
@@ -168,14 +168,14 @@ export default function RequestRidePage() {
           {poolFull && (
             <div
               role="alert"
-              className="rounded border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
+              className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900"
             >
-              <p className="font-medium">Bullet is full on this route</p>
-              <p className="mt-1">
-                Every seat on {pickup} → {destination} is taken. Try another route, or open your
+              <p className="font-semibold">This route is full</p>
+              <p className="mt-1 leading-relaxed">
+                Every seat from {pickup} to {destination} is taken. Try another route, or open your
                 current ride to see the seat you hold.
               </p>
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-4 flex flex-wrap gap-2">
                 <Button
                   type="button"
                   variant="secondary"
@@ -187,7 +187,7 @@ export default function RequestRidePage() {
                 >
                   Choose another route
                 </Button>
-                <Link href="/passenger">
+                <Link href="/passenger/rides">
                   <Button type="button" variant="secondary">
                     My rides
                   </Button>
@@ -211,11 +211,9 @@ export default function RequestRidePage() {
         </div>
 
         <div className="space-y-3">
-          <h2 className="text-sm font-medium text-slate-600">Fare</h2>
-
           {estimate === null && !estimating && estimateError === null && (
-            <Card>
-              <p className="text-sm text-slate-600">
+            <Card title="Fare">
+              <p className="text-sm leading-relaxed text-ink-500">
                 Pick a pickup and a destination to see the fare, the pool discount and the seats
                 left on this route.
               </p>
@@ -223,7 +221,7 @@ export default function RequestRidePage() {
           )}
 
           {estimating && estimate === null && (
-            <Card>
+            <Card title="Fare">
               <div className="space-y-3" aria-busy="true">
                 <Skeleton className="h-9 w-32" />
                 <Skeleton className="h-20 w-full" />
@@ -235,17 +233,21 @@ export default function RequestRidePage() {
             <ErrorBanner message={estimateError} onRetry={handleEstimateRetry} />
           )}
 
-          {estimate !== null && <FareCard estimate={estimate} seats={seats} />}
+          {estimate !== null && <FareCard estimate={estimate} seats={requestedSeats} />}
 
           {estimate !== null && (
-            <p className="text-xs text-slate-500" data-pool-available-seats={availableSeats}>
-              {availableSeats} of {seatCapacity} seats left on this route
+            <p
+              className="rounded-xl border border-ink-900/5 bg-white px-4 py-2.5 text-center text-xs font-medium text-ink-500"
+              data-pool-available-seats={availableSeats}
+            >
+              <span className="font-bold text-brand-700">{availableSeats}</span> of {seatCapacity}{' '}
+              seats left on this route
             </p>
           )}
 
           <Notice>
-            Seats are claimed atomically: two passengers racing for the last seat produce one
-            confirmation and one honest &ldquo;Bullet is full&rdquo;.
+            Seats are held the moment they are claimed: if two passengers request the last seat at
+            the same time, one gets it and the other is told the route is full.
           </Notice>
         </div>
       </form>

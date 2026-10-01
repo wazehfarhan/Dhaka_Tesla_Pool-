@@ -12,10 +12,11 @@
 # No mocks and no jq: each check greps the response body, and a mismatch exits
 # non-zero with the body printed.
 #
-# Expect ~4 minutes, not seconds: the script registers nine users and the auth
-# limiter allows 10 requests/minute/IP (security.md §5), so it pauses and says
-# so rather than failing. That is the documented production limit being
-# reproduced faithfully — raise RATE_LIMIT_MAX_AUTH to skip the pause.
+# Expect well under a minute: the script registers nine users, and the demo
+# stack runs the credential ceiling at 30 requests/minute/IP (compose default,
+# security.md §5) so they all fit in one window. If you have lowered
+# RATE_LIMIT_MAX_AUTH to the production 10/min, the script notices, waits out
+# the window and carries on rather than failing — see register() below.
 #
 # It also assumes a *fresh* database: leftover demo rows from an earlier run
 # would fill the demo corridor, and the script says so and exits rather than
@@ -57,14 +58,14 @@ register() {
   local name="$1" email="$2-$STAMP@example.com" role="$3"
   local response
   response="$(api POST /auth/register '' "{\"name\":\"$name\",\"email\":\"$email\",\"password\":\"demo1234\",\"role\":\"$role\"}")"
-  # The auth limiter is 10 requests/minute/IP (security.md §5) and this script
-  # registers more than ten people, so a stock stack will throttle us. That is
-  # correct behaviour, not a bug: wait out the window and carry on, exactly as a
-  # real user would. Set RATE_LIMIT_MAX_AUTH higher to skip the pause.
+  # The credential limiter (security.md §5) is 10 req/min/IP in the code
+  # defaults and 30 in the demo stack. Either way, a stack configured at the
+  # lower value will throttle us mid-script, and that is correct behaviour, not
+  # a bug: wait out the window and carry on, exactly as a real user would.
   if printf '%s' "$response" | grep -q RATE_LIMITED; then
     # stderr, never stdout: this function's stdout *is* the token the caller
     # captures, and a notice printed there would corrupt the Bearer header.
-    printf '  … auth rate limit reached (10/min, security.md §5) — waiting 61s\n' >&2
+    printf '  … credential rate limit reached (security.md §5) — waiting 61s\n' >&2
     sleep 61
     response="$(api POST /auth/register '' "{\"name\":\"$name\",\"email\":\"$email\",\"password\":\"demo1234\",\"role\":\"$role\"}")"
   fi

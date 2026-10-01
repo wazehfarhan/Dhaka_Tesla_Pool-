@@ -12,7 +12,7 @@
 import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { Skeleton } from '@/components/ui';
+import { Skeleton, Button, Notice } from '@/components/ui';
 import { useAuth } from '@/components/auth-provider';
 import { homePathFor, loginPathFor } from '@/lib/routes';
 import type { Role } from '@/lib/types';
@@ -29,24 +29,43 @@ function GuardSkeleton() {
 }
 
 export function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
-  const { status, user } = useAuth();
+  const { status, user, restoring, retryRestore } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
   const wrongRole = status === 'authenticated' && user !== null && user.role !== role;
 
   useEffect(() => {
-    if (status === 'guest') {
+    // While a throttled restore is being retried, do NOT send the user to
+    // `/login`: they are still signed in, we just could not read the cookie yet.
+    if (status === 'guest' && !restoring) {
       router.replace(loginPathFor(pathname));
       return;
     }
     if (wrongRole && user !== null) {
       router.replace(homePathFor(user.role));
     }
-  }, [status, wrongRole, user, router, pathname]);
+  }, [status, restoring, wrongRole, user, router, pathname]);
 
   if (status === 'loading') return <GuardSkeleton />;
+  if (restoring) return <RestoringPanel onRetry={retryRestore} />;
   if (status === 'guest' || user === null || wrongRole) return <GuardSkeleton />;
 
   return <>{children}</>;
+}
+
+/** "Still signed in, the server is just busy" — honest, and it retries itself. */
+function RestoringPanel({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div role="status" aria-busy="true" className="space-y-4">
+      <Notice tone="warn">
+        Still signed in — the server asked us to slow down. Retrying in a moment.
+      </Notice>
+      <div className="flex justify-center">
+        <Button variant="secondary" onClick={onRetry}>
+          Try again now
+        </Button>
+      </div>
+    </div>
+  );
 }

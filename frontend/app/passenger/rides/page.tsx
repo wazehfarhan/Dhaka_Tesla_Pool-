@@ -19,6 +19,7 @@ import {
   EmptyState,
   ErrorBanner,
   PageHeading,
+  RouteLine,
   SelectField,
   Skeleton,
   StatusChip,
@@ -93,8 +94,8 @@ export default function RideHistoryPage() {
         actions={<PollIndicator failed={failed} />}
       />
 
-      <Card>
-        <div className="max-w-xs">
+      <div className="surface px-4 py-3.5 sm:flex sm:items-center sm:justify-between sm:gap-4">
+        <div className="w-full sm:max-w-xs">
           <SelectField
             label="Filter by status"
             name="status"
@@ -111,7 +112,11 @@ export default function RideHistoryPage() {
             ))}
           </SelectField>
         </div>
-      </Card>
+        <p className="mt-3 text-sm text-ink-500 sm:mt-0">
+          {state.total} ride{state.total === 1 ? '' : 's'}
+          {status === '' ? '' : ' matching that filter'}
+        </p>
+      </div>
 
       {state.error !== null && <ErrorBanner message={state.error} onRetry={refresh} />}
 
@@ -143,7 +148,7 @@ export default function RideHistoryPage() {
 
       {!loading && state.rides.length > 0 && (
         <Card>
-          <ul className="divide-y divide-slate-100">
+          <ul className="divide-y divide-ink-900/5">
             {state.rides.map((ride) => (
               <RideRow key={ride.id} ride={ride} />
             ))}
@@ -151,20 +156,22 @@ export default function RideHistoryPage() {
 
           <nav
             aria-label="Pagination"
-            className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm"
+            className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-ink-900/5 pt-4 text-sm"
           >
             <Button
               variant="secondary"
+              className="py-2"
               onClick={() => setPage((current) => Math.max(current - 1, 1))}
               disabled={page <= 1}
             >
               Previous
             </Button>
-            <span className="text-slate-600" data-page={page} data-total={state.total}>
-              Page {page} of {pageCount} · {state.total} ride{state.total === 1 ? '' : 's'}
+            <span className="text-ink-500" data-page={page} data-total={state.total}>
+              Page {page} of {pageCount}
             </span>
             <Button
               variant="secondary"
+              className="py-2"
               onClick={() => setPage((current) => current + 1)}
               disabled={page >= pageCount}
             >
@@ -183,28 +190,28 @@ function RideRow({ ride }: { ride: RideListItem }) {
     ride.payment === null ? 'Payment pending' : ride.payment.status === 'PAID' ? 'Paid' : 'Unpaid';
 
   return (
-    <li className="flex flex-wrap items-center justify-between gap-3 py-3">
+    <li className="flex flex-wrap items-center justify-between gap-3 py-4 first:pt-0 last:pb-0">
       <div className="min-w-0">
         <Link
-          className="font-medium text-emerald-700 hover:underline"
+          className="font-semibold text-ink-900 hover:text-brand-700"
           href={`/passenger/rides/${ride.id}`}
         >
-          {ride.pickupZone} → {ride.destinationZone}
+          <RouteLine from={ride.pickupZone} to={ride.destinationZone} />
         </Link>
-        <p className="text-xs text-slate-500">
+        <p className="mt-0.5 text-xs text-ink-500">
           {formatDateTime(ride.createdAt)} · {seatsLabel(ride.seats)}
           {ride.distanceKm === null ? '' : ` · ${ride.distanceKm} km`}
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <StatusChip status={ride.status} label={statusLabel(ride.status)} />
+      <div className="flex flex-wrap items-center gap-2.5">
         <span
-          className="text-sm font-medium text-slate-900"
+          className="text-sm font-bold tracking-tight text-ink-900"
           data-poisha={ride.fare?.totalPoisha ?? 0}
         >
           {ride.fare === null ? '—' : formatBdt(ride.fare.totalPoisha)}
         </span>
+        <StatusChip status={ride.status} label={statusLabel(ride.status)} />
         <StatusChip status={ride.payment?.status ?? 'NO_PAYMENT'} label={paymentLabel} />
       </div>
     </li>
