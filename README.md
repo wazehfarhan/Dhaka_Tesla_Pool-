@@ -117,13 +117,13 @@ Every value is documented in [.env.example](.env.example) and validated when the
 ([docs/security.md](docs/security.md) §6) — a missing or too-short JWT secret fails the boot loudly
 rather than at first use.
 
-| Variable                                   | Purpose                                                                                                         |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`                             | Postgres connection (Compose builds its own from `POSTGRES_*`)                                                  |
-| `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | ≥ 32 characters each — generate with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
-| `CORS_ORIGIN`                              | Comma-separated allowed origins                                                                                 |
-| `RATE_LIMIT_MAX` / `RATE_LIMIT_MAX_AUTH`   | Request ceilings (defaults 100/min, 10/min — security.md §5)                                                    |
-| `NEXT_PUBLIC_API_URL`                      | Inlined into the web bundle **at build time**; changing it needs `docker compose build web`                     |
+| Variable                                                            | Purpose                                                                                                         |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                                      | Postgres connection (Compose builds its own from `POSTGRES_*`)                                                  |
+| `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET`                          | ≥ 32 characters each — generate with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
+| `CORS_ORIGIN`                                                       | Comma-separated allowed origins                                                                                 |
+| `RATE_LIMIT_MAX` / `RATE_LIMIT_MAX_AUTH` / `RATE_LIMIT_MAX_REFRESH` | Request ceilings (defaults 100/min general, 10/min on login+register, 30/min on refresh — security.md §5)       |
+| `NEXT_PUBLIC_API_URL`                                               | Inlined into the web bundle **at build time**; changing it needs `docker compose build web`                     |
 
 ## Migrations & seed
 

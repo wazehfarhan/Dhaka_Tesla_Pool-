@@ -2,8 +2,8 @@
  * Idempotent seed — safe to run as many times as you like (deployment.md §1).
  *
  * - Reference data (zones + 28 integer-km distances) is seeded in every environment.
- * - The demo cast and Bullet are seeded only outside production (NODE_ENV=production seeds
- *   reference data only, so no default passwords can ever reach a deployed database).
+ * - The demo cast and Bullet are seeded outside production, or in production when
+ *   `SEED_DEMO_USERS=1` (the local demo stack sets it; a real deployment does not).
  * - Nothing is ever overwritten: existing rows keep their state (e.g. Jashim staying ONLINE
  *   after a re-seed).
  *
@@ -107,9 +107,17 @@ async function seed(): Promise<void> {
       });
     }
 
-    // 3. Demo cast & vehicle (only seeded outside production)
-    const isProduction = process.env['NODE_ENV'] === 'production';
-    if (isProduction) {
+    // 3. Demo cast & vehicle.
+    //
+    // Off in production by default, so no default password can ever reach a
+    // deployed database — but an explicit `SEED_DEMO_USERS=1` opts a *demo*
+    // deployment in. That flag is what lets the local Compose stack offer the
+    // demo-cast buttons on `/login`: the UI shows them only when
+    // `NEXT_PUBLIC_DEMO_ACCOUNTS` is on, and both are set together there, so the
+    // page can never advertise accounts the database does not have.
+    const wantsDemoUsers =
+      process.env['SEED_DEMO_USERS'] === '1' || process.env['SEED_DEMO_USERS'] === 'true';
+    if (process.env['NODE_ENV'] === 'production' && !wantsDemoUsers) {
       console.log('Production environment detected: seeded reference zones & distances only.');
       return;
     }

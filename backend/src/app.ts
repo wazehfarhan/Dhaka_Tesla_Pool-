@@ -25,7 +25,7 @@ export interface AppDependencies {
    * the documented security.md §5 defaults.
    */
   env: Pick<Env, 'CORS_ORIGIN' | 'NODE_ENV' | 'JWT_ACCESS_SECRET' | 'JWT_REFRESH_SECRET'> &
-    Partial<Pick<Env, 'RATE_LIMIT_MAX' | 'RATE_LIMIT_MAX_AUTH'>>;
+    Partial<Pick<Env, 'RATE_LIMIT_MAX' | 'RATE_LIMIT_MAX_AUTH' | 'RATE_LIMIT_MAX_REFRESH'>>;
   logger: AppLogger;
   database?: Database;
 }
@@ -63,12 +63,19 @@ export function createApp({ env, logger, database }: AppDependencies): Express {
   app.use(helmet());
 
   // Rate limiting runs before body parsing: a flood never reaches JSON decoding.
-  const { general, auth } = createRateLimiters({
+  // Three buckets (security.md §5), each mounted on exactly the paths it is meant
+  // to cover — a prefix mount of `/api/v1/auth` would also swallow
+  // `/api/v1/auth/refresh`, quietly capping the refresh bucket at the much lower
+  // credential ceiling and reintroducing the bug the separate bucket fixed.
+  const { general, auth, refresh } = createRateLimiters({
     general: env.RATE_LIMIT_MAX,
     auth: env.RATE_LIMIT_MAX_AUTH,
+    refresh: env.RATE_LIMIT_MAX_REFRESH,
   });
   app.use(general);
-  app.use('/api/v1/auth', auth);
+  app.use('/api/v1/auth/refresh', refresh);
+  app.use('/api/v1/auth/login', auth);
+  app.use('/api/v1/auth/register', auth);
 
   app.use(express.json({ limit: '100kb' }));
 

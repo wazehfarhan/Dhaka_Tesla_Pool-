@@ -47,6 +47,14 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?copy .env.example to .env — JWT_ACCESS_SECRET is required}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?copy .env.example to .env — JWT_REFRESH_SECRET is required}
+      # Demo affordances, off by default so a deployment never ships default
+      # passwords. The local stack turns them on: the seed creates the demo cast
+      # and the login page offers one-click sign-in for it. Set
+      # SEED_DEMO_USERS=0 to keep the cast out of a demo database too.
+      SEED_DEMO_USERS: ${SEED_DEMO_USERS:-1}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-300}
+      RATE_LIMIT_MAX_AUTH: ${RATE_LIMIT_MAX_AUTH:-30}
+      RATE_LIMIT_MAX_REFRESH: ${RATE_LIMIT_MAX_REFRESH:-60}
     ports:
       - '${PORT:-4000}:4000'
     depends_on:
@@ -60,6 +68,10 @@ services:
       dockerfile: frontend/Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+        # Build-time flag: render the one-click demo-cast buttons on /login.
+        # Kept next to the API's SEED_DEMO_USERS so the page can only advertise
+        # accounts the database actually has.
+        NEXT_PUBLIC_DEMO_ACCOUNTS: ${NEXT_PUBLIC_DEMO_ACCOUNTS:-1}
     environment:
       # Read at runtime for any server-side fetch; the browser copy is the
       # inlined build arg above.
