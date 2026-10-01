@@ -20,6 +20,9 @@ COPY frontend ./frontend
 # not at runtime (deployment.md §1; the frontend's .env.example says the same).
 ARG NEXT_PUBLIC_API_URL=http://localhost:4000
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+# Same build-time rule for the demo-cast buttons on /login (see docker-compose.yml).
+ARG NEXT_PUBLIC_DEMO_ACCOUNTS=0
+ENV NEXT_PUBLIC_DEMO_ACCOUNTS=$NEXT_PUBLIC_DEMO_ACCOUNTS
 ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN npm run build --workspace frontend

@@ -2,10 +2,21 @@ import { rateLimit } from 'express-rate-limit';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { AppError } from '../shared/errors.js';
 
-/** security.md §5: 100 req/min/IP general, 10 req/min on /auth/*. */
+/** security.md §5: 100 req/min/IP general, 10 req/min on /auth/login|register. */
 const WINDOW_MS = 60_000;
 const GENERAL_LIMIT = 100;
 const AUTH_LIMIT = 10;
+/**
+ * `POST /auth/refresh` gets its own bucket instead of sharing the credential one.
+ *
+ * It is not a credential attack surface — there is no password to guess, only an
+ * `httpOnly` cookie the browser sends automatically — and it is called by the app
+ * itself on **every page load** (silent session restore). Sharing the 10/min
+ * credential bucket meant that opening a few tabs could throttle the very next
+ * sign-in, which is indistinguishable from a brute-force lockout to the user.
+ * 30/min is generous for reloads and still bounded.
+ */
+const REFRESH_LIMIT = 30;
 
 /**
  * Optional overrides for the two ceilings.
@@ -20,6 +31,7 @@ const AUTH_LIMIT = 10;
 export interface RateLimitOverrides {
   general?: number;
   auth?: number;
+  refresh?: number;
 }
 
 /** Every rejection answers in the documented envelope (api.md §1), not plain text. */
@@ -33,6 +45,7 @@ function rejectionHandler(_req: Request, res: Response, _next: NextFunction): vo
 export interface RateLimiters {
   general: RequestHandler;
   auth: RequestHandler;
+  refresh: RequestHandler;
 }
 
 /**
@@ -41,20 +54,18 @@ export interface RateLimiters {
  * (security.md §5); the scale-up path is a shared store.
  */
 export function createRateLimiters(overrides: RateLimitOverrides = {}): RateLimiters {
+  const make = (limit: number) =>
+    rateLimit({
+      windowMs: WINDOW_MS,
+      limit,
+      standardHeaders: true,
+      legacyHeaders: false,
+      handler: rejectionHandler,
+    });
+
   return {
-    general: rateLimit({
-      windowMs: WINDOW_MS,
-      limit: overrides.general ?? GENERAL_LIMIT,
-      standardHeaders: true,
-      legacyHeaders: false,
-      handler: rejectionHandler,
-    }),
-    auth: rateLimit({
-      windowMs: WINDOW_MS,
-      limit: overrides.auth ?? AUTH_LIMIT,
-      standardHeaders: true,
-      legacyHeaders: false,
-      handler: rejectionHandler,
-    }),
+    general: make(overrides.general ?? GENERAL_LIMIT),
+    auth: make(overrides.auth ?? AUTH_LIMIT),
+    refresh: make(overrides.refresh ?? REFRESH_LIMIT),
   };
 }

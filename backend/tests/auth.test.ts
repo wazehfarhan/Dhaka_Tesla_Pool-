@@ -388,6 +388,27 @@ describe('rate limiting (security.md §5)', () => {
     expect(retryAfter).toBeGreaterThanOrEqual(1);
     expect(retryAfter).toBeLessThanOrEqual(60);
   });
+
+  it('keeps /auth/refresh out of the credential bucket, so reloads cannot lock out a sign-in', async () => {
+    const { app } = makeApp();
+
+    // Exhaust the credential ceiling on login…
+    for (let attempt = 1; attempt <= 10; attempt += 1) {
+      await request(app).post('/api/v1/auth/login').send({});
+    }
+    const blocked = await request(app).post('/api/v1/auth/login').send({});
+    expect(blocked.status).toBe(429);
+
+    // …then prove a session restore is still served from its own, larger bucket.
+    // This is the bug a prefix mount of `/api/v1/auth` would reintroduce: refresh
+    // would silently inherit the 10/min credential ceiling, and a user whose
+    // access token expired right after a few reloads would be signed out by a
+    // throttle rather than restored (see `RefreshOutcome` in frontend/lib/api.ts).
+    for (let attempt = 1; attempt <= 20; attempt += 1) {
+      const response = await request(app).post('/api/v1/auth/refresh');
+      expect(response.status).not.toBe(429);
+    }
+  });
 });
 
 describe('authenticate / authorize middleware (role gates)', () => {

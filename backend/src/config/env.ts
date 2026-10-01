@@ -22,6 +22,7 @@ export const envSchema = z.object({
    */
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(100),
   RATE_LIMIT_MAX_AUTH: z.coerce.number().int().min(1).default(10),
+  RATE_LIMIT_MAX_REFRESH: z.coerce.number().int().min(1).default(30),
 });
 
 export type Env = z.infer<typeof envSchema>;
