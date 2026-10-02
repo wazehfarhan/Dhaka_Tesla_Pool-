@@ -12,6 +12,7 @@ import {
   CANCELLABLE_RIDE_STATUSES,
   CANCEL_REASONS,
   decideCancel,
+  toCancelRefusal,
   type CancelDecision,
 } from '../driver/driver.transitions.js';
 import { createFareService, estimateFare } from '../fare/fare.service.js';
@@ -404,9 +405,7 @@ export function createRidesService({ database }: { database?: Database }): Rides
         if (claimed === 0) {
           const fresh = await rides.findOwnedRide(passengerId, rideId);
           const latest = fresh?.status ?? current;
-          throw cancelRefusal(
-            decideCancel('ride', latest) as Exclude<CancelDecision, { ok: true }>,
-          );
+          throw cancelRefusal(toCancelRefusal(decideCancel('ride', latest), latest));
         }
 
         const member = await rides.findMemberByRide(rideId);

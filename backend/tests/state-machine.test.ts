@@ -6,6 +6,7 @@ import {
   DRIVER_TRANSITIONS,
   decideCancel,
   decideTransition,
+  toCancelRefusal,
   type DriverAction,
 } from '../src/modules/driver/driver.transitions.js';
 
@@ -144,5 +145,33 @@ describe('cancellation rules (FR-PASSENGER-005, FR-DRIVER-005, PRD §14)', () =>
     // `OPEN` is the pool's pre-acceptance phase; a ride is never `OPEN`.
     expect(decideCancel('ride', 'OPEN').ok).toBe(false);
     expect(decideCancel('pool', 'REQUESTED').ok).toBe(false);
+  });
+
+  /**
+   * The race path re-runs the decision *after* a conditional update claimed zero
+   * rows, so the service knows a refusal happened even though the type still
+   * allows `ok: true`. `toCancelRefusal` is what makes that callable without an
+   * `as` cast: a real refusal passes through untouched (the two codes stay
+   * distinguishable) and a stale "cancellable" read becomes the generic 409
+   * instead of a licence to cancel.
+   */
+  it('normalizes a re-read decision into a refusal, never into permission', () => {
+    expect(toCancelRefusal(decideCancel('ride', 'STARTED'), 'STARTED')).toEqual({
+      ok: false,
+      code: 'RIDE_ALREADY_STARTED',
+      current: 'STARTED',
+    });
+    expect(toCancelRefusal(decideCancel('ride', 'CANCELLED'), 'CANCELLED')).toEqual({
+      ok: false,
+      code: 'ILLEGAL_STATE_TRANSITION',
+      current: 'CANCELLED',
+    });
+    // Unreachable after a 0-row claim, but the union allows it: it must still
+    // refuse, carrying the status that was just re-read.
+    expect(toCancelRefusal({ ok: true }, 'ACCEPTED')).toEqual({
+      ok: false,
+      code: 'ILLEGAL_STATE_TRANSITION',
+      current: 'ACCEPTED',
+    });
   });
 });

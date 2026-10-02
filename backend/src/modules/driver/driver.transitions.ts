@@ -104,3 +104,21 @@ export function decideCancel(subject: CancelSubject, current: string): CancelDec
   if (current === 'STARTED') return { ok: false, code: 'RIDE_ALREADY_STARTED', current };
   return { ok: false, code: 'ILLEGAL_STATE_TRANSITION', current };
 }
+
+/**
+ * The race path's normalizer (the second `decideCancel` call in each cancel
+ * service): the conditional update already claimed **zero** rows, so the state
+ * moved under us and a refusal is the only truthful answer — yet the fresh read
+ * still types as "maybe cancellable". This narrows the union for real, with no
+ * `as`: an `ok: true` after a failed claim can only mean the re-read went stale,
+ * so it becomes the generic `409 ILLEGAL_STATE_TRANSITION` (never a licence to
+ * cancel), carrying the status we just re-read as the documented `current`
+ * detail. A genuine refusal is returned untouched, so `RIDE_ALREADY_STARTED`
+ * stays distinguishable (api.md §5.4).
+ */
+export function toCancelRefusal(
+  decision: CancelDecision,
+  current: string,
+): Exclude<CancelDecision, { ok: true }> {
+  return decision.ok ? { ok: false, code: 'ILLEGAL_STATE_TRANSITION', current } : decision;
+}

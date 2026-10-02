@@ -15,6 +15,7 @@ import {
   CANCEL_REASONS,
   DRIVER_TRANSITIONS,
   decideCancel,
+  toCancelRefusal,
   type CancelDecision,
   type DriverAction,
 } from './driver.transitions.js';
@@ -329,7 +330,7 @@ export function createDriverService({ database }: { database?: Database }): Driv
         if (claimed === 0) {
           const fresh = await pools.findPool(poolId);
           const latest = fresh?.status ?? current;
-          throw cancelError(decideCancel('pool', latest) as Exclude<CancelDecision, { ok: true }>);
+          throw cancelError(toCancelRefusal(decideCancel('pool', latest), latest));
         }
 
         const activeRides = await pools.listActivePoolRides(poolId);
