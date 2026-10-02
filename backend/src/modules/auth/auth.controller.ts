@@ -17,15 +17,21 @@ import type { AuthService } from './auth.service.js';
  */
 export interface AuthControllerDependencies {
   service: AuthService;
-  env: Pick<Env, 'CORS_ORIGIN' | 'NODE_ENV'>;
+  env: Pick<Env, 'CORS_ORIGIN' | 'NODE_ENV' | 'COOKIE_SAMESITE'>;
 }
 
-/** Cookie flags from security.md §1: httpOnly, SameSite=Lax, Secure in production, scoped path. */
-function refreshCookieOptions(env: Pick<Env, 'NODE_ENV'>): CookieOptions {
+/**
+ * Cookie flags from security.md §1: httpOnly, SameSite, Secure in production,
+ * scoped path. `COOKIE_SAMESITE=none` is the split-domain production mode
+ * (Vercel web → Render API): browsers only accept `SameSite=None` with
+ * `Secure`, so Secure is forced there regardless of NODE_ENV.
+ */
+function refreshCookieOptions(env: Pick<Env, 'NODE_ENV' | 'COOKIE_SAMESITE'>): CookieOptions {
+  const crossSite = env.COOKIE_SAMESITE === 'none';
   return {
     httpOnly: true,
-    sameSite: 'lax',
-    secure: env.NODE_ENV === 'production',
+    sameSite: crossSite ? 'none' : 'lax',
+    secure: env.NODE_ENV === 'production' || crossSite,
     path: REFRESH_COOKIE_PATH,
     maxAge: REFRESH_TOKEN_TTL_MS,
   };

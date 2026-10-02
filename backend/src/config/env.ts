@@ -15,6 +15,19 @@ export const envSchema = z.object({
   JWT_ACCESS_SECRET: z.string().min(32, 'JWT_ACCESS_SECRET must be at least 32 characters'),
   JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 characters'),
   /**
+   * Refresh-cookie SameSite mode (security.md §1).
+   *
+   * `lax` is right for same-site deployments (local compose, single-domain VPS):
+   * the browser sends the cookie on top-level navigation and same-site fetches.
+   * A split-domain production deploy (Vercel web → Render API) is *cross-site*,
+   * and browsers refuse to send `Lax` cookies on cross-site `fetch POST` — which
+   * is exactly what silent session restore is. There the cookie must be
+   * `SameSite=None; Secure`, otherwise every page reload bounces to `/login`.
+   * `none` without `Secure` is rejected by browsers, so the controller forces
+   * `Secure` whenever this is `none` (even outside production).
+   */
+  COOKIE_SAMESITE: z.enum(['lax', 'none']).default('lax'),
+  /**
    * Rate-limit ceilings (security.md §5). Configurable because an operator may
    * want different numbers — and because the concurrency suite fires hundreds
    * of requests on purpose, where being throttled by our own limiter would look

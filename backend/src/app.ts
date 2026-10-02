@@ -40,6 +40,14 @@ export function createApp({ env, logger, database }: AppDependencies): Express {
 
   app.disable('x-powered-by');
 
+  /**
+   * Behind Render (or any reverse proxy) every client arrives via
+   * `X-Forwarded-For`. Without this the rate limiter keys all visitors as the
+   * proxy IP — one user's reloads throttle everyone. `1` trusts exactly one
+   * proxy hop (Render's router); deeper chains are not expected in this deploy.
+   */
+  app.set('trust proxy', 1);
+
   app.use(
     pinoHttp({
       logger,

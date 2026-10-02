@@ -23,6 +23,7 @@ const env = {
   NODE_ENV: 'test' as const,
   JWT_ACCESS_SECRET: 'test_access_secret_at_least_32_characters_long',
   JWT_REFRESH_SECRET: 'test_refresh_secret_at_least_32_characters_long',
+  COOKIE_SAMESITE: 'lax' as const,
 };
 
 const PASSWORD = 'supersecret123';
@@ -185,6 +186,56 @@ describe('POST /api/v1/auth/login', () => {
     expect(setCookie).toContain('SameSite=Lax');
     expect(setCookie).toContain(`Path=${REFRESH_COOKIE_PATH}`);
     expect(setCookie).not.toContain('Secure');
+  });
+
+  it('uses SameSite=None; Secure in split-domain production (COOKIE_SAMESITE=none)', async () => {
+    const { app } = makeApp();
+    await register(app);
+    const response = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'nusrat@example.com', password: PASSWORD });
+    expect(response.status).toBe(200);
+    // Default fixture env is `lax` — the cross-site assertion needs its own app.
+    expect(refreshCookieHeader(response)).toContain('SameSite=Lax');
+  });
+
+  it('sets SameSite=None; Secure when COOKIE_SAMESITE=none (Vercel → Render)', async () => {
+    const database = createFakeDatabase();
+    const crossSiteApp: Express = createApp({
+      env: { ...env, COOKIE_SAMESITE: 'none' },
+      logger,
+      database,
+    });
+    await register(crossSiteApp);
+    const response = await request(crossSiteApp)
+      .post('/api/v1/auth/login')
+      .send({ email: 'nusrat@example.com', password: PASSWORD });
+    expect(response.status).toBe(200);
+    const setCookie = refreshCookieHeader(response);
+    expect(setCookie).toContain('SameSite=None');
+    expect(setCookie).toContain('Secure');
+  });
+
+  it('rate-limits per forwarded client IP behind a proxy (trust proxy)', async () => {
+    const { app } = makeApp();
+    // Ten failing logins from one spoofed client exhaust *its* 10/min bucket …
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await request(app)
+        .post('/api/v1/auth/login')
+        .set('X-Forwarded-For', '198.51.100.7')
+        .send({ email: 'nobody@example.com', password: PASSWORD });
+    }
+    const throttled = await request(app)
+      .post('/api/v1/auth/login')
+      .set('X-Forwarded-For', '198.51.100.7')
+      .send({ email: 'nobody@example.com', password: PASSWORD });
+    expect(throttled.status).toBe(429);
+    // … while a different client IP on the same proxy is unaffected.
+    const other = await request(app)
+      .post('/api/v1/auth/login')
+      .set('X-Forwarded-For', '203.0.113.9')
+      .send({ email: 'nobody@example.com', password: PASSWORD });
+    expect(other.status).toBe(401);
   });
 
   it('answers 401 INVALID_CREDENTIALS identically for unknown email and wrong password', async () => {
