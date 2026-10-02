@@ -66,7 +66,7 @@ Database  → Neon Free (Postgres)
 
 The Vercel project's **Root Directory is the repo root**, not `frontend/`, because `vercel.json`'s `buildCommand` (`npm run vercel-build`) must run `prisma migrate deploy && generate && db seed` and the workspace install from the root; `outputDirectory` then points at `frontend/.next`.
 
-On Vercel, Next.js 16 does not call Vercel's wrapper the old way — Vercel injects its **build adapter** (`NEXT_ADAPTER_PATH` → `@vercel/next`'s `dist/adapter`), which Next runs *before* the `output: 'standalone'` post-processing (Next's own `build/index.js` notes standalone "might not be allowed if an adapter with onBuildComplete is configured"). The adapter writes `routes-manifest-deterministic.json` beside `routes-manifest.json` and registers it as a build-output asset; standalone handling then leaves it absent from `.next/`, so the deploy fails **after** "Build Completed" with:
+On Vercel, Next.js 16 does not call Vercel's wrapper the old way — Vercel injects its **build adapter** (`NEXT_ADAPTER_PATH` → `@vercel/next`'s `dist/adapter`), which Next runs _before_ the `output: 'standalone'` post-processing (Next's own `build/index.js` notes standalone "might not be allowed if an adapter with onBuildComplete is configured"). The adapter writes `routes-manifest-deterministic.json` beside `routes-manifest.json` and registers it as a build-output asset; standalone handling then leaves it absent from `.next/`, so the deploy fails **after** "Build Completed" with:
 
 ```text
 ENOENT: no such file or directory, lstat '/vercel/path0/frontend/.next/routes-manifest-deterministic.json'
