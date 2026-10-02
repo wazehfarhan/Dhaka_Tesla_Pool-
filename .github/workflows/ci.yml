@@ -37,6 +37,13 @@ jobs:
       - name: Install
         run: npm ci
 
+      # The generated Prisma client is gitignored, so a fresh checkout has none
+      # and typecheck/test/build cannot resolve `generated/prisma/client.js`.
+      # `npm ci` never runs a `prepare` script, so this is explicit here, exactly
+      # as it is in scripts/vercel-build.sh and backend/Dockerfile.
+      - name: Generate Prisma client
+        run: npm run prisma:generate --workspace backend
+
       - name: Lint
         run: npm run lint
 
@@ -84,6 +91,11 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      # Same reason as the quality job: the suite imports the client's enums,
+      # and `npm ci` on a fresh checkout leaves src/generated empty.
+      - name: Generate Prisma client
+        run: npm run prisma:generate --workspace backend
 
       - name: Concurrency suite (100 iterations + constraint proofs)
         run: npm run test:concurrency --workspace backend
@@ -137,6 +149,10 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      # Same reason as the quality job.
+      - name: Generate Prisma client
+        run: npm run prisma:generate --workspace backend
 
       - name: Run the default suite ten times
         run: ./scripts/flake-audit.sh 10

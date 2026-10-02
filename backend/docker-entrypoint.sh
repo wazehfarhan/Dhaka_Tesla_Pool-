@@ -7,6 +7,10 @@
 #
 # `set -e` matters: if the migration fails we must NOT start a server against a
 # schema the code does not expect. A loud crash beats a silent half-migrated DB.
+#
+# No `prisma generate` here: the image build runs it (backend/Dockerfile) and
+# the runtime stage copies the result into src/generated, so the client is
+# already on disk. Generating again would only add a step to every start.
 set -e
 
 # Prisma 7 finds its config (`prisma7.config.ts`, which owns the datasource URL
@@ -16,11 +20,6 @@ cd /app/backend
 
 echo "→ prisma migrate deploy"
 npx prisma migrate deploy
-
-# The generated client is gitignored, so a fresh image has no client.js for
-# tsx to resolve until this runs (same fix as scripts/vercel-build.sh).
-echo "→ prisma generate"
-npx prisma generate
 
 echo "→ prisma db seed"
 npx prisma db seed

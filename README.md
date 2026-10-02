@@ -128,9 +128,14 @@ rather than at first use.
 ## Migrations & seed
 
 ```bash
+npm run prisma:generate --workspace backend  # writes the gitignored client to src/generated
 npm run prisma:migrate --workspace backend   # apply committed migrations
 npm run prisma:seed --workspace backend      # idempotent: zones, 28 distances, demo cast
 ```
+
+`prisma:generate` is not optional on a fresh clone: `src/generated/` is gitignored, so
+`typecheck`, `test` and the Docker image build all need it first (each deploy path does it
+for you — `backend/Dockerfile` at image build, `scripts/vercel-build.sh` on Vercel, and CI).
 
 Deploy paths always use `migrate deploy`, never `db push`.
 

@@ -23,11 +23,14 @@ WORKDIR /app
 
 COPY backend ./backend
 
-# No `prisma generate` in the image build steps below: the generated client is
-# gitignored under src/generated and produced by `prisma generate` at deploy
-# time — `docker-entrypoint.sh` (runtime, after migrate) for Compose, and
-# `scripts/vercel-build.sh` (build time, between migrate and seed) on Vercel.
-# `npm run typecheck` fails if schema and client ever drift, so CI is the guard.
+# The client is gitignored, so a clean checkout has no src/generated for `tsc`
+# to resolve. `.dockerignore` does not exclude it, which is why this only bit a
+# *clean* context — CI's images job and a reviewer's first `docker compose up
+# --build` — and not a machine where it had already been generated once.
+# Generating inside the image keeps the build reproducible from a git checkout;
+# `npm run typecheck` remains the guard against schema/client drift.
+RUN npm run prisma:generate --workspace backend
+
 RUN npm run build --workspace backend
 
 # ── runtime ───────────────────────────────────────────────────────────────────
@@ -45,7 +48,8 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/backend/dist ./backend/dist
 # The seed runs from source through tsx (Prisma's configured seed command), so
 # it imports the *source* generated client; the compiled API uses dist's copy.
-# Both are the same committed output — src/generated (Phase 2).
+# Both come from the generate step above — one output, two entry points. Also
+# why the entrypoint never generates: the client is baked in here.
 COPY --from=build /app/backend/src/generated ./backend/src/generated
 COPY --from=build /app/backend/prisma ./backend/prisma
 COPY --from=build /app/backend/prisma7.config.ts ./backend/prisma7.config.ts
