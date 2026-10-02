@@ -62,6 +62,18 @@ Database  → Neon Free (Postgres)
 6. **Rollback:** Vercel — one-click rollback to any previous deployment; Render — redeploy previous commit (clean git history makes this trivial); Neon — free-plan PITR window is limited, so schema changes are forward-only with reversible migration files.
 7. **URLs (placeholders — replace after deploy, record in README):** frontend `https://dhaka-tesla-pool.vercel.app` · API `https://dhaka-tesla-pool-api.onrender.com` · health `…/api/v1/health`.
 
+#### Vercel build: `output: 'standalone'` vs Vercel's build adapter
+
+The Vercel project's **Root Directory is the repo root**, not `frontend/`, because `vercel.json`'s `buildCommand` (`npm run vercel-build`) must run `prisma migrate deploy && generate && db seed` and the workspace install from the root; `outputDirectory` then points at `frontend/.next`.
+
+On Vercel, Next.js 16 does not call Vercel's wrapper the old way — Vercel injects its **build adapter** (`NEXT_ADAPTER_PATH` → `@vercel/next`'s `dist/adapter`), which Next runs *before* the `output: 'standalone'` post-processing (Next's own `build/index.js` notes standalone "might not be allowed if an adapter with onBuildComplete is configured"). The adapter writes `routes-manifest-deterministic.json` beside `routes-manifest.json` and registers it as a build-output asset; standalone handling then leaves it absent from `.next/`, so the deploy fails **after** "Build Completed" with:
+
+```text
+ENOENT: no such file or directory, lstat '/vercel/path0/frontend/.next/routes-manifest-deterministic.json'
+```
+
+Fix (`frontend/next.config.ts`): `output: process.env.VERCEL ? undefined : 'standalone'` — Vercel gets an ordinary build, while Docker (which never sets `VERCEL`) still receives the standalone server the image copies. Same failure family as [vercel/next.js#96646](https://github.com/vercel/next.js/issues/96646); the identifier can also come from a **multi-segment Root Directory** path bug dropping segments ([vercel/vercel#15937](https://github.com/vercel/vercel/issues/15937)).
+
 ### Production vs local differences
 
 | Concern    | Local               | Production                                        |
