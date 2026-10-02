@@ -4,6 +4,5 @@
   "outputDirectory": "frontend/.next",
   "installCommand": "npm ci",
   "framework": "nextjs",
-  "rewrites": [{ "source": "/api/:path*", "destination": "/api/index" }],
-  "functions": { "api/index.ts": { "maxDuration": 15 } }
+  "rewrites": [{ "source": "/api/:path*", "destination": "/api/index" }]
 }
