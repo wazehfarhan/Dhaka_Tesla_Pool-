@@ -48,6 +48,13 @@ export interface RateLimiters {
   refresh: RequestHandler;
 }
 
+// ── Vercel note ─────────────────────────────────────────────────────────────
+// In-memory counters are per function instance: two concurrent instances each
+// allow 100/min. For an MVP demo that is acceptable (limits still bite, just
+// with N× headroom where N is live instances). The honest scale-up is an
+// Upstash Redis store (`@upstash/ratelimit`) — documented in
+// deployment.md §2, not wired, because it needs a paid-adjacent account.
+// `trust proxy` in app.ts keeps per-IP keying correct behind Vercel's edge.
 /**
  * Factories return fresh limiters with their own in-memory store, so counters
  * are per-app-instance. Single-instance memory is acceptable for the MVP
