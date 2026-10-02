@@ -397,7 +397,10 @@ export function createRidesService({ database }: { database?: Database }): Rides
 
         const current = ride.status;
         const decision = decideCancel('ride', current);
-        if (!decision.ok) throw cancelRefusal(decision);
+        // `=== false`, not `!decision.ok`: truthiness does not narrow the `ok`
+        // discriminant unless `strictNullChecks` is on, so the shorthand leaves
+        // the whole union (including `ok: true`) flowing into the refusal helper.
+        if (decision.ok === false) throw cancelRefusal(decision);
 
         // Atomic gate: 0 rows means the driver started it (or someone else
         // cancelled it) between the read above and here.

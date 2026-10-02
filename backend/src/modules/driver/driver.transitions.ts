@@ -115,10 +115,18 @@ export function decideCancel(subject: CancelSubject, current: string): CancelDec
  * cancel), carrying the status we just re-read as the documented `current`
  * detail. A genuine refusal is returned untouched, so `RIDE_ALREADY_STARTED`
  * stays distinguishable (api.md §5.4).
+ *
+ * The test is spelled `decision.ok === false` — never `!decision.ok` or a plain
+ * `decision.ok ?`: truthiness does not narrow a boolean discriminant unless
+ * `strictNullChecks` is on, so the shorthand would keep `ok: true` inside the
+ * returned union (TS2322) under any looser configuration. The explicit
+ * comparison narrows the union in either configuration, so no `as` is needed.
  */
 export function toCancelRefusal(
   decision: CancelDecision,
   current: string,
 ): Exclude<CancelDecision, { ok: true }> {
-  return decision.ok ? { ok: false, code: 'ILLEGAL_STATE_TRANSITION', current } : decision;
+  return decision.ok === false
+    ? decision
+    : { ok: false, code: 'ILLEGAL_STATE_TRANSITION', current };
 }

@@ -323,7 +323,10 @@ export function createDriverService({ database }: { database?: Database }): Driv
 
         const current = pool.status;
         const decision = decideCancel('pool', current);
-        if (!decision.ok) throw cancelError(decision);
+        // `=== false`, not `!decision.ok`: truthiness does not narrow the `ok`
+        // discriminant unless `strictNullChecks` is on, so the shorthand leaves
+        // the whole union (including `ok: true`) flowing into the refusal helper.
+        if (decision.ok === false) throw cancelError(decision);
 
         // Atomic gate: 0 rows means the pool started or was cancelled under us.
         const claimed = await pools.claimPoolCancellation(poolId, CANCELLABLE_POOL_STATUSES);
