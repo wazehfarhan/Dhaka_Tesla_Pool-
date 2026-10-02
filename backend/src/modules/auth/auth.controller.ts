@@ -17,7 +17,7 @@ import type { AuthService } from './auth.service.js';
  */
 export interface AuthControllerDependencies {
   service: AuthService;
-  env: Pick<Env, 'CORS_ORIGIN' | 'NODE_ENV' | 'COOKIE_SAMESITE'>;
+  env: Pick<Env, 'CORS_ORIGIN' | 'NODE_ENV'> & Partial<Pick<Env, 'COOKIE_SAMESITE'>>;
 }
 
 /**
@@ -26,7 +26,9 @@ export interface AuthControllerDependencies {
  * (Vercel web → Render API): browsers only accept `SameSite=None` with
  * `Secure`, so Secure is forced there regardless of NODE_ENV.
  */
-function refreshCookieOptions(env: Pick<Env, 'NODE_ENV' | 'COOKIE_SAMESITE'>): CookieOptions {
+function refreshCookieOptions(
+  env: Partial<Pick<Env, 'NODE_ENV' | 'COOKIE_SAMESITE'>> & Pick<Env, 'NODE_ENV'>,
+): CookieOptions {
   const crossSite = env.COOKIE_SAMESITE === 'none';
   return {
     httpOnly: true,

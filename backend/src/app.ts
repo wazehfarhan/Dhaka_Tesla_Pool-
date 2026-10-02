@@ -25,7 +25,12 @@ export interface AppDependencies {
    * the documented security.md §5 defaults.
    */
   env: Pick<Env, 'CORS_ORIGIN' | 'NODE_ENV' | 'JWT_ACCESS_SECRET' | 'JWT_REFRESH_SECRET'> &
-    Partial<Pick<Env, 'RATE_LIMIT_MAX' | 'RATE_LIMIT_MAX_AUTH' | 'RATE_LIMIT_MAX_REFRESH'>>;
+    Partial<
+      Pick<
+        Env,
+        'RATE_LIMIT_MAX' | 'RATE_LIMIT_MAX_AUTH' | 'RATE_LIMIT_MAX_REFRESH' | 'COOKIE_SAMESITE'
+      >
+    >;
   logger: AppLogger;
   database?: Database;
 }

@@ -7,7 +7,7 @@ import type { TokenService } from './token.service.js';
 
 export interface AuthRouterDependencies {
   database?: Database;
-  env: Pick<Env, 'CORS_ORIGIN' | 'NODE_ENV' | 'COOKIE_SAMESITE'>;
+  env: Pick<Env, 'CORS_ORIGIN' | 'NODE_ENV'> & Partial<Pick<Env, 'COOKIE_SAMESITE'>>;
   tokens: TokenService;
   authenticate: RequestHandler;
 }
