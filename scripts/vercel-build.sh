@@ -46,6 +46,12 @@ done
 
 cd backend
 npx prisma migrate deploy
+# The generated client is gitignored (backend/src/generated/), so a fresh clone
+# — Vercel, CI, a reviewer's machine — has no client.js for tsx to resolve
+# until this runs. Same config, same custom output path (../src/generated/prisma
+# per schema.prisma); must precede the seed AND the frontend build, because
+# api/index.ts transitively imports ../backend/src/generated/prisma/client.js.
+npx prisma generate
 # The seed is idempotent (reference zones/distances only in production — no
 # demo passwords), so re-running on every deploy is safe.
 npx prisma db seed

@@ -17,6 +17,11 @@ cd /app/backend
 echo "→ prisma migrate deploy"
 npx prisma migrate deploy
 
+# The generated client is gitignored, so a fresh image has no client.js for
+# tsx to resolve until this runs (same fix as scripts/vercel-build.sh).
+echo "→ prisma generate"
+npx prisma generate
+
 echo "→ prisma db seed"
 npx prisma db seed
 

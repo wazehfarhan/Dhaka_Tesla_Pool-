@@ -23,10 +23,11 @@ WORKDIR /app
 
 COPY backend ./backend
 
-# No `prisma generate` here: the generated client is committed under
-# src/generated (Phase 2) and `npm run typecheck` fails if the schema and the
-# client ever drift, so CI is the guard. Generating again in an image build would
-# add a network-dependent step for no gain.
+# No `prisma generate` in the image build steps below: the generated client is
+# gitignored under src/generated and produced by `prisma generate` at deploy
+# time — `docker-entrypoint.sh` (runtime, after migrate) for Compose, and
+# `scripts/vercel-build.sh` (build time, between migrate and seed) on Vercel.
+# `npm run typecheck` fails if schema and client ever drift, so CI is the guard.
 RUN npm run build --workspace backend
 
 # ── runtime ───────────────────────────────────────────────────────────────────
